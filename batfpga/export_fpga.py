@@ -7,10 +7,14 @@ Outputs:
   golden/bins.hex              FFT magnitude stream: one 32-bit word per bin = (bin<<16)|mag
   golden/expected_events.txt   frame class conf dur f_start f_end f_peak f_min f_max bw sweep
   golden/classes.txt           class id -> name, risk group
+  golden/audio.hex             int16 audio stream (one 16-bit word per sample) for the full-chain test
+  golden/bins_fixed.hex        same as bins.hex but from the RTL fixed-point FFT model (fft_model.py)
+  golden/expected_events_fixedfft.txt   events from the fixed-point FFT (bit-exact target for bat_top)
 """
 import os, pickle
 import numpy as np
 from bat_model import fft_mags, frame_stats, detect, FEATURES
+from fft_model import fft_mags_fixed
 from synth_bats import make_recording, CLASSES, RISK
 
 os.makedirs("rtl", exist_ok=True); os.makedirs("golden", exist_ok=True)
@@ -85,6 +89,20 @@ with open("golden/expected_events.txt", "w") as f:
         if c != dt.predict(np.array([feats]))[0]:
             mismatch += 1
         f.write(f"{en} {c} {conf} " + " ".join(map(str, feats)) + "\n")
+# full chain (audio -> RTL FFT): bit-exact targets from the fixed-point FFT model
+with open("golden/audio.hex", "w") as f:
+    for v in x.astype(np.int16).view(np.uint16):
+        f.write(f"{int(v):04x}\n")
+mags_fx = fft_mags_fixed(x)
+with open("golden/bins_fixed.hex", "w") as f:
+    for fr in mags_fx:
+        for b, mg in enumerate(fr):
+            f.write(f"{(b << 16) | int(mg):08x}\n")
+events_fx = detect(*frame_stats(mags_fx))
+with open("golden/expected_events_fixedfft.txt", "w") as f:
+    for st, en, feats in events_fx:
+        c, conf = predict_int(feats)
+        f.write(f"{en} {c} {conf} " + " ".join(map(str, feats)) + "\n")
 with open("golden/classes.txt", "w") as f:
     for i, c in enumerate(CLASSES):
         f.write(f"{i} {c} {RISK.get(c, 'other_bat')}\n")
@@ -92,6 +110,8 @@ with open("golden/classes.txt", "w") as f:
 seg = len(x) // len(seq) // 256
 print(f"bat_tree.v: depth {dt.get_depth()}, {dt.get_n_leaves()} leaves")
 print(f"golden: {len(mags)} frames, {len(events)} events, int-vs-sklearn mismatches: {mismatch}")
+print(f"fixed-point FFT: {len(events_fx)} events (float FFT: {len(events)}), "
+      f"max |mag diff| {int(np.abs(mags_fx - mags).max())}")
 for st, en, feats in events:
     c, conf = predict_int(feats)
     print(f"  frame {en:5d}  true {seq[min(st // seg, len(seq) - 1)]:7s} -> {CLASSES[c]:7s} conf {conf}")
