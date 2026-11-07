@@ -6,3 +6,6 @@
 # Bat Calls Dataset for Deep Learning Classification
 - [Dataset Link](https://data.mendeley.com/datasets/g7jy5s65v7/2)
 - Citation: (Marie Ndiaye, 2026)
+
+# Training dataset for NABat Machine Learning V1.0
+- [Dataset Link](https://www.sciencebase.gov/catalog/item/627ed4b2d34e3bef0c9a2f30)
