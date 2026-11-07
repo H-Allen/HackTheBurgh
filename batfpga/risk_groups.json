@@ -1,0 +1,14 @@
+{
+ "CNESER": "EBLV1_reservoir",
+ "MINSCH": "Lloviu_reservoir",
+ "MYOCAP": "other_bat",
+ "NYCNOC": "other_bat",
+ "PIPKUH/PIPNAT": "other_bat",
+ "PIPPIP": "other_bat",
+ "RHIBLA": "SARSr-CoV_reservoir",
+ "RHIEUR": "SARSr-CoV_reservoir",
+ "RHIFER": "SARSr-CoV_reservoir",
+ "RHIHIP": "SARSr-CoV_reservoir",
+ "RHIMEH": "SARSr-CoV_reservoir",
+ "OTHER": "other_bat"
+}

@@ -9,12 +9,15 @@ FFT  = rtl/bat_top.v rtl/fft256.v rtl/fft256_rom.v
 .PHONY: sim sim_top sim_tree sim_axi test golden lint clean sdcard
 # make sdcard - collect everything the board needs into sdcard/batfpga/ (copy that folder to the SD card).
 # bat.bit/bat.hwh come from the lab Vivado build (overlay/); re-run after retraining to refresh tree.hex.
+# make sdcard SD=batfpga_eu  -> sdcard/batfpga_eu/ (includes golden/demo/*.wav clips if present)
+SD ?= batfpga
 sdcard:
-	mkdir -p sdcard/batfpga
+	rm -rf sdcard/$(SD) && mkdir -p sdcard/$(SD)
 	cp board/run_bat.py golden/tree.hex golden/classes.txt golden/audio.wav golden/audio.hex \
-	   golden/expected_events_fixedfft.txt sdcard/batfpga/
-	-cp overlay/bat.bit overlay/bat.hwh sdcard/batfpga/ 2>/dev/null || echo "NOTE: no overlay/bat.bit yet - build it in Vivado (vivado/build.tcl)"
-	@du -sh sdcard/batfpga
+	   golden/expected_events_fixedfft.txt sdcard/$(SD)/
+	-cp golden/demo/*.wav sdcard/$(SD)/ 2>/dev/null
+	-cp overlay/bat.bit overlay/bat.hwh sdcard/$(SD)/ 2>/dev/null || echo "NOTE: no overlay/bat.bit yet - build it in Vivado (vivado/build.tcl)"
+	@ls sdcard/$(SD); du -sh sdcard/$(SD)
 test: sim sim_top sim_tree sim_axi
 sim_axi:
 	verilator $(VFLAGS) --top-module bat_axi -Mdir obj_dir_axi rtl/bat_axi.v $(FFT) $(POST) sim/tb_axi.cpp -o tb_axi > /dev/null
