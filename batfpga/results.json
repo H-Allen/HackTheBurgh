@@ -1,0 +1,48 @@
+{
+  "results": {
+    "decision_tree_d8 (FPGA)": {
+      "species_acc": 0.936,
+      "risk_group_acc": 0.946
+    },
+    "random_forest_100": {
+      "species_acc": 0.951,
+      "risk_group_acc": 0.956
+    },
+    "grad_boost": {
+      "species_acc": 0.941,
+      "risk_group_acc": 0.949
+    }
+  },
+  "classes": [
+    "MYODAU",
+    "EPTSER",
+    "PIPPIP",
+    "PIPPYG",
+    "PIPNAT",
+    "NYCNOC",
+    "NYCLEI",
+    "MYONAT",
+    "MYOMYS",
+    "PLEAUR",
+    "BARBAR",
+    "RHIFER",
+    "RHIHIP",
+    "NOISE"
+  ],
+  "risk": {
+    "MYODAU": "EBLV2_reservoir",
+    "EPTSER": "EBLV1_reservoir",
+    "PIPPIP": "other_bat",
+    "PIPPYG": "other_bat",
+    "PIPNAT": "other_bat",
+    "NYCNOC": "other_bat",
+    "NYCLEI": "other_bat",
+    "MYONAT": "other_bat",
+    "MYOMYS": "other_bat",
+    "PLEAUR": "other_bat",
+    "BARBAR": "other_bat",
+    "RHIFER": "other_bat",
+    "RHIHIP": "other_bat",
+    "NOISE": "noise"
+  }
+}

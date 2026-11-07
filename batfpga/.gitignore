@@ -1,0 +1,7 @@
+.venv/
+obj_dir*/
+sim_events.txt
+__pycache__/
+*.vcd
+*.fst
+.DS_Store

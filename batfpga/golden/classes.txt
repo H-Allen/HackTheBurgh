@@ -1,0 +1,14 @@
+0 MYODAU EBLV2_reservoir
+1 EPTSER EBLV1_reservoir
+2 PIPPIP other_bat
+3 PIPPYG other_bat
+4 PIPNAT other_bat
+5 NYCNOC other_bat
+6 NYCLEI other_bat
+7 MYONAT other_bat
+8 MYOMYS other_bat
+9 PLEAUR other_bat
+10 BARBAR other_bat
+11 RHIFER other_bat
+12 RHIHIP other_bat
+13 NOISE noise
