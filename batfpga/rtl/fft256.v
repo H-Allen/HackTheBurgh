@@ -20,7 +20,8 @@ module fft256 (
 
     output reg                out_valid,
     output reg         [6:0]  out_bin,
-    output reg         [15:0] out_mag
+    output reg         [15:0] out_mag,
+    output wire               busy          // computing / outputting (not waiting for samples)
 );
     localparam integer DW   = 22;   // fft_model.DW
     localparam integer FRAC = 4;    // fft_model.FRAC
@@ -54,6 +55,7 @@ module fft256 (
     wire signed [DW-1:0] xw_ext = {{(DW-16-FRAC){xw[15]}}, xw, {FRAC{1'b0}}};
     wire [7:0] cnt_rev = {cnt[0], cnt[1], cnt[2], cnt[3], cnt[4], cnt[5], cnt[6], cnt[7]};
     assign in_ready = (state == S_LOAD);
+    assign busy     = (state != S_LOAD);
 
     // ---------------- butterfly addressing ----------------
     wire [7:0] bf8  = {1'b0, bf};

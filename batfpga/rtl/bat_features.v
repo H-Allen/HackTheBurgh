@@ -4,6 +4,8 @@
 // Input: FFT magnitude stream, bins 0..127 of each 256-pt frame IN ORDER, one per
 //        in_valid cycle (gaps allowed). mag = |re|+|im|, saturated to 16 bits.
 // Output: one out_valid pulse per detected call, with features, class id, confidence.
+// PROG_TREE=0: fixed tree from bat_tree.v (1-cycle). PROG_TREE=1: tree_walker.v with a node
+// table written through tree_we/tree_waddr/tree_wdata (<= 10 cycles; calls are >= 128 cycles apart).
 `default_nettype none
 module bat_features #(
     parameter integer BIN_LO    = 15,
@@ -12,13 +14,18 @@ module bat_features #(
     parameter integer THR_SHIFT = 2,
     parameter integer EMA_SHIFT = 4,
     parameter integer MIN_DUR   = 2,
-    parameter integer MAX_DUR   = 63
+    parameter integer MAX_DUR   = 63,
+    parameter integer PROG_TREE = 0
 ) (
     input  wire        clk,
     input  wire        rst,
     input  wire        in_valid,
     input  wire [6:0]  in_bin,
     input  wire [15:0] in_mag,
+
+    input  wire        tree_we,       // PROG_TREE=1 only
+    input  wire [8:0]  tree_waddr,
+    input  wire [31:0] tree_wdata,
 
     output reg         out_valid,
     output reg  [31:0] out_frame,     // index of frame where call ended (first quiet frame)
@@ -129,25 +136,40 @@ module bat_features #(
     end
 
     // ---------------- classifier ----------------
+    wire [63:0] r_feats = {r_sweep, r_bw, r_max, r_min, r_peak, r_end, r_start, r_dur};
+    wire       t_done;
     wire [3:0] t_class;
     wire [7:0] t_conf;
-    bat_tree u_tree (
-        .f_dur(r_dur), .f_start(r_start), .f_end(r_end), .f_peak(r_peak),
-        .f_min(r_min), .f_max(r_max), .f_bw(r_bw), .f_sweep(r_sweep),
-        .cls(t_class), .conf(t_conf)
-    );
+    generate
+        if (PROG_TREE != 0) begin : g_prog
+            tree_walker u_walk (
+                .clk(clk), .rst(rst),
+                .we(tree_we), .waddr(tree_waddr), .wdata(tree_wdata),
+                .start(evt), .feats(r_feats),
+                .done(t_done), .cls(t_class), .conf(t_conf)
+            );
+        end else begin : g_fixed
+            bat_tree u_tree (
+                .f_dur(r_dur), .f_start(r_start), .f_end(r_end), .f_peak(r_peak),
+                .f_min(r_min), .f_max(r_max), .f_bw(r_bw), .f_sweep(r_sweep),
+                .cls(t_class), .conf(t_conf)
+            );
+            assign t_done = evt;
+            wire unused_tree = &{1'b0, tree_we, tree_waddr, tree_wdata};
+        end
+    endgenerate
 
     always @(posedge clk) begin
         if (rst) begin
             out_valid <= 1'b0; out_frame <= 32'd0; out_class <= 4'd0; out_conf <= 8'd0;
             out_feats <= 64'd0;
         end else begin
-            out_valid <= evt;
-            if (evt) begin
+            out_valid <= t_done;
+            if (t_done) begin
                 out_frame <= evt_frame;
                 out_class <= t_class;
                 out_conf  <= t_conf;
-                out_feats <= {r_sweep, r_bw, r_max, r_min, r_peak, r_end, r_start, r_dur};
+                out_feats <= r_feats;
             end
         end
     end

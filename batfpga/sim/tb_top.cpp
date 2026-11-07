@@ -56,7 +56,7 @@ int main(int argc, char** argv) {
 
     VerilatedContext* ctx = new VerilatedContext;
     Vbat_top* top = new Vbat_top{ctx};
-    top->rst = 1; top->in_valid = 0; top->in_sample = 0;
+    top->rst = 1; top->in_valid = 0; top->in_sample = 0; top->tree_we = 0;
     auto tick = [&]() { top->clk = 0; top->eval(); top->clk = 1; top->eval(); };
     tick(); tick(); top->rst = 0;
 

@@ -35,7 +35,7 @@ int main(int argc, char** argv) {
     Vbat_features* top = new Vbat_features{ctx};
     auto tick = [&]() { top->clk = 0; top->eval(); top->clk = 1; top->eval(); };
 
-    top->rst = 1; top->in_valid = 0; tick(); tick(); top->rst = 0;
+    top->rst = 1; top->in_valid = 0; top->tree_we = 0; tick(); tick(); top->rst = 0;
 
     std::vector<Ev> got;
     auto capture = [&]() {

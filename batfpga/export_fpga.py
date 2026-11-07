@@ -7,6 +7,7 @@ Outputs:
   golden/bins.hex              FFT magnitude stream: one 32-bit word per bin = (bin<<16)|mag
   golden/expected_events.txt   frame class conf dur f_start f_end f_peak f_min f_max bw sweep
   golden/classes.txt           class id -> name, risk group
+  golden/tree.hex              node table for the programmable tree (tree_walker.v), loaded at run time
   golden/audio.hex             int16 audio stream (one 16-bit word per sample) for the full-chain test
   golden/bins_fixed.hex        same as bins.hex but from the RTL fixed-point FFT model (fft_model.py)
   golden/expected_events_fixedfft.txt   events from the fixed-point FFT (bit-exact target for bat_top)
@@ -70,6 +71,33 @@ endmodule
 """
 open("rtl/bat_tree.v", "w").write(v)
 
+# ---------------- programmable tree table (tree_walker.v) ----------------
+def node_word(n):
+    if T.children_left[n] == -1:
+        c, conf = leaf(n)
+        return (1 << 31) | (c << 8) | conf
+    thr = int(np.floor(T.threshold[n]))
+    assert 0 <= thr <= 255 and T.node_count <= 512
+    return (int(T.feature[n]) << 28) | (thr << 20) | (int(T.children_right[n]) << 9) | int(T.children_left[n])
+
+TABLE = [node_word(n) for n in range(T.node_count)]
+TABLE += [(1 << 31) | (15 << 8)] * (512 - len(TABLE))      # unused slots: invalid-class leaves
+
+
+def predict_table(f, table=TABLE):
+    """Python model of tree_walker.v."""
+    n = 0
+    while not table[n] >> 31:
+        w = table[n]
+        n = (w & 0x1ff) if f[(w >> 28) & 7] <= ((w >> 20) & 0xff) else ((w >> 9) & 0x1ff)
+    return (table[n] >> 8) & 0xf, table[n] & 0xff
+
+with open("golden/tree.hex", "w") as f:
+    f.write("".join(f"{w:08x}\n" for w in TABLE))
+_rng = np.random.default_rng(7)
+_rand = _rng.integers(0, 256, (20000, 8))
+assert all(predict_table(f) == predict_int(f) for f in _rand), "tree table != generated tree"
+
 # ---------------- golden vectors ----------------
 rng = np.random.default_rng(123)          # fresh recordings, not in training set
 seq = ["MYODAU", "EPTSER", "PIPPIP", "NOISE", "MYOMYS", "RHIHIP", "NYCNOC", "PLEAUR"]
@@ -108,7 +136,7 @@ with open("golden/classes.txt", "w") as f:
         f.write(f"{i} {c} {RISK.get(c, 'other_bat')}\n")
 
 seg = len(x) // len(seq) // 256
-print(f"bat_tree.v: depth {dt.get_depth()}, {dt.get_n_leaves()} leaves")
+print(f"bat_tree.v: depth {dt.get_depth()}, {dt.get_n_leaves()} leaves; tree.hex: {T.node_count}/512 nodes")
 print(f"golden: {len(mags)} frames, {len(events)} events, int-vs-sklearn mismatches: {mismatch}")
 print(f"fixed-point FFT: {len(events_fx)} events (float FFT: {len(events)}), "
       f"max |mag diff| {int(np.abs(mags_fx - mags).max())}")

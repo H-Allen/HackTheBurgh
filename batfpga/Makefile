@@ -3,10 +3,13 @@
 # make golden   - regenerate ROMs, bat_tree.v and golden vectors from tree.pkl
 PY ?= .venv/bin/python
 VFLAGS = --cc --exe --build -O2 -Wno-fatal -Wno-WIDTH -Irtl
-POST = rtl/bat_features.v rtl/bat_tree.v
+POST = rtl/bat_features.v rtl/bat_tree.v rtl/tree_walker.v
 FFT  = rtl/bat_top.v rtl/fft256.v rtl/fft256_rom.v
 
-.PHONY: sim sim_top golden lint clean
+.PHONY: sim sim_top sim_tree golden lint clean
+sim_tree:
+	verilator $(VFLAGS) --top-module tree_eq -Mdir obj_dir_tree sim/tree_eq.v rtl/tree_walker.v rtl/bat_tree.v sim/tb_tree.cpp -o tb_tree > /dev/null
+	./obj_dir_tree/tb_tree golden/tree.hex
 sim:
 	verilator $(VFLAGS) --top-module bat_features $(POST) sim/tb_bat.cpp -o tb_bat > /dev/null
 	./obj_dir/tb_bat golden/bins.hex golden/expected_events.txt
@@ -18,4 +21,4 @@ golden:
 lint:
 	verilator --lint-only -Wall -Wno-UNUSEDSIGNAL -Wno-DECLFILENAME -Irtl --top-module bat_top $(FFT) $(POST)
 clean:
-	rm -rf obj_dir obj_dir_top sim_events*.txt
+	rm -rf obj_dir obj_dir_top obj_dir_tree obj_dir_axi sim_events*.txt
