@@ -8,11 +8,12 @@ Outputs:
   golden/expected_events.txt   frame class conf dur f_start f_end f_peak f_min f_max bw sweep
   golden/classes.txt           class id -> name, risk group
   golden/tree.hex              node table for the programmable tree (tree_walker.v), loaded at run time
+  golden/audio.wav             same audio as a 256 kHz mono wav (demo input for board/run_bat.py)
   golden/audio.hex             int16 audio stream (one 16-bit word per sample) for the full-chain test
   golden/bins_fixed.hex        same as bins.hex but from the RTL fixed-point FFT model (fft_model.py)
   golden/expected_events_fixedfft.txt   events from the fixed-point FFT (bit-exact target for bat_top)
 """
-import os, pickle
+import os, pickle, wave
 import numpy as np
 from bat_model import fft_mags, frame_stats, detect, FEATURES
 from fft_model import fft_mags_fixed
@@ -121,6 +122,9 @@ with open("golden/expected_events.txt", "w") as f:
 with open("golden/audio.hex", "w") as f:
     for v in x.astype(np.int16).view(np.uint16):
         f.write(f"{int(v):04x}\n")
+with wave.open("golden/audio.wav", "wb") as w:            # same audio as a 256 kHz demo wav
+    w.setnchannels(1); w.setsampwidth(2); w.setframerate(256000)
+    w.writeframes(x.astype("<i2").tobytes())
 mags_fx = fft_mags_fixed(x)
 with open("golden/bins_fixed.hex", "w") as f:
     for fr in mags_fx:

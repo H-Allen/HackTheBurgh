@@ -6,7 +6,15 @@ VFLAGS = --cc --exe --build -O2 -Wno-fatal -Wno-WIDTH -Irtl
 POST = rtl/bat_features.v rtl/bat_tree.v rtl/tree_walker.v
 FFT  = rtl/bat_top.v rtl/fft256.v rtl/fft256_rom.v
 
-.PHONY: sim sim_top sim_tree sim_axi test golden lint clean
+.PHONY: sim sim_top sim_tree sim_axi test golden lint clean sdcard
+# make sdcard - collect everything the board needs into sdcard/batfpga/ (copy that folder to the SD card).
+# bat.bit/bat.hwh come from the lab Vivado build (overlay/); re-run after retraining to refresh tree.hex.
+sdcard:
+	mkdir -p sdcard/batfpga
+	cp board/run_bat.py golden/tree.hex golden/classes.txt golden/audio.wav golden/audio.hex \
+	   golden/expected_events_fixedfft.txt sdcard/batfpga/
+	-cp overlay/bat.bit overlay/bat.hwh sdcard/batfpga/ 2>/dev/null || echo "NOTE: no overlay/bat.bit yet - build it in Vivado (vivado/build.tcl)"
+	@du -sh sdcard/batfpga
 test: sim sim_top sim_tree sim_axi
 sim_axi:
 	verilator $(VFLAGS) --top-module bat_axi -Mdir obj_dir_axi rtl/bat_axi.v $(FFT) $(POST) sim/tb_axi.cpp -o tb_axi > /dev/null
