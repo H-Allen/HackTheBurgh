@@ -36,7 +36,7 @@ This is an iterative radix-2 FFT built for low power. It has one butterfly unit 
 - On the synthetic golden stream, events from the RTL FFT match the float-FFT reference 46/46, with every feature identical.
 - `in_ready` goes low while a frame is computing. That is fine for audio fed from BRAM/DDR, but a live 256 kHz ADC needs a FIFO of at least 256 samples in front.
 
-## PYNQ-Z2 board
+## PYNQ-Z2 board  (step-by-step: BOARD_GUIDE.md)
 The decision tree is **programmable**: `tree_walker.v` walks a node table (`golden/tree.hex`), and `run_bat.py` loads that table at start-up. After retraining you only copy a new `tree.hex`. The bitstream does not need rebuilding.
 
 **1. Build the bitstream (lab machine with Vivado, once):**
