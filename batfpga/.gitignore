@@ -10,3 +10,4 @@ vivado/proj/
 .Xil/
 *.jou
 *.log
+sim_events*.txt

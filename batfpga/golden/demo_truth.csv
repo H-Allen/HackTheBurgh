@@ -1,0 +1,13 @@
+start_frame,end_frame,species,class
+0,550,Cnephaeus_serotinus,CNESER
+550,1100,Miniopterus_schreibersii,MINSCH
+1100,1650,Myotis_capaccinii,MYOCAP
+1650,2200,Nyctalus_noctula,NYCNOC
+2200,2750,Pipistrellus_kuhlii,PIPKUH/PIPNAT
+2750,3300,Pipistrellus_nathusii,PIPKUH/PIPNAT
+3300,3850,Pipistrellus_pipistrellus,PIPPIP
+3850,4650,Rhinolophus_blasii,RHIBLA
+4650,5450,Rhinolophus_euryale,RHIEUR
+5450,5646,Rhinolophus_ferrumequinum,RHIFER
+5646,5844,Rhinolophus_hipposideros,RHIHIP
+5844,6282,Rhinolophus_mehelyi,RHIMEH

@@ -15,6 +15,7 @@ sdcard:
 	rm -rf sdcard/$(SD) && mkdir -p sdcard/$(SD)
 	cp board/run_bat.py golden/tree.hex golden/classes.txt golden/audio.wav golden/audio.hex \
 	   golden/expected_events_fixedfft.txt sdcard/$(SD)/
+	-cp golden/demo_truth.csv sdcard/$(SD)/ 2>/dev/null
 	-cp golden/demo/*.wav sdcard/$(SD)/ 2>/dev/null
 	-cp overlay/bat.bit overlay/bat.hwh sdcard/$(SD)/ 2>/dev/null || echo "NOTE: no overlay/bat.bit yet - build it in Vivado (vivado/build.tcl)"
 	@ls sdcard/$(SD); du -sh sdcard/$(SD)

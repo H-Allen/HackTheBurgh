@@ -8,6 +8,7 @@ On the board (serial console):
     python3 run_bat.py audio.wav                      # as fast as possible
     python3 run_bat.py audio.wav --realtime           # paced to real time (live-looking demo)
     python3 run_bat.py audio.hex --expect expected_events_fixedfft.txt   # self-test
+    python3 run_bat.py audio.wav --truth demo_truth.csv --realtime       # demo with ground truth
 
 stdout: frame_idx,class_id,confidence,dur,f_start,f_end,f_peak,f_min,f_max,bw,sweep
 stderr: species names, stats, PASS/FAIL (so stdout stays clean CSV for the dashboard).
@@ -65,6 +66,8 @@ def main():
     ap.add_argument("--out", help="also write CSV to this file")
     ap.add_argument("--header", action="store_true", help="print CSV header line first")
     ap.add_argument("--quiet", action="store_true", help="no per-call species line on stderr")
+    ap.add_argument("--truth", help="demo_truth.csv (start_frame,end_frame,species,class): "
+                                    "show true species next to each FPGA answer + accuracy")
     a = ap.parse_args()
 
     from pynq import Overlay, allocate, Clocks
@@ -73,6 +76,17 @@ def main():
     x = x[: len(x) & ~1]                              # DMA words carry 2 samples
     tree = [int(l, 16) for l in open(a.tree) if l.strip()]
     names = load_classes(a.classes)
+    truth = []
+    if a.truth:
+        for l in open(a.truth).read().splitlines()[1:]:
+            p = l.split(",")
+            if len(p) >= 4:
+                truth.append((int(p[0]), int(p[1]), p[2], p[3]))
+    def true_of(frame):
+        for s0, s1, sp, cl in truth:
+            if s0 <= frame - 1 < s1:              # frame = first quiet frame after the call
+                return sp, cl
+        return None
     log(f"audio: {len(x)} samples = {len(x) / FS:.2f} s; tree: {len(tree)} nodes")
 
     t = time.time()
@@ -112,7 +126,14 @@ def main():
             events.append(ev)
             emit(",".join(map(str, ev)))
             if not a.quiet:
-                log(f"  t={frame / 1000:8.3f}s  {names.get(ev[1], ev[1])}  conf {ev[2]}")
+                pred = names.get(ev[1], str(ev[1]))
+                t = true_of(frame) if truth else None
+                if t:
+                    ok = pred.split()[0] == t[1]
+                    log(f"  t={frame / 1000:8.3f}s  true {t[0]:28s} FPGA {pred.split()[0]:14s} conf {ev[2]:3d}  "
+                        f"{'OK' if ok else 'x'}")
+                else:
+                    log(f"  t={frame / 1000:8.3f}s  {pred}  conf {ev[2]}")
 
     chunk = max(2, int(a.chunk * FS) & ~1)
     bufs = {}
@@ -149,6 +170,13 @@ def main():
     log(f"FFT busy {100 * busy / max(cyc, 1):.1f}% of cycles (rest idle waiting for samples)")
     log(f"wall clock incl. DMA + Python: {wall:.2f} s total, {hw_s:.2f} s in DMA+compute "
         f"({audio_s / max(hw_s, 1e-9):.1f}x real time)")
+
+    if truth:
+        hits = [(true_of(e[0]), names.get(e[1], str(e[1])).split()[0]) for e in events]
+        hits = [(t, p) for t, p in hits if t]
+        if hits:
+            log(f"labels vs demo_truth: {sum(t[1] == p for t, p in hits)}/{len(hits)} calls correct "
+                f"(species), {len({t[0] for t, p in hits})} species in the demo")
 
     if a.expect:
         exp = [tuple(int(v) for v in l.split()) for l in open(a.expect) if l.strip()]

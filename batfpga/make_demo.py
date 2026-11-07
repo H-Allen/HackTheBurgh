@@ -6,11 +6,13 @@ make_demo.py - build demo / golden audio from HELD-OUT real recordings (manifest
      golden/demo_golden.wav                          short concatenation (--golden-seconds per
                                                      species) used by export_fpga.py --audio for
                                                      the board self-test vectors
+     golden/demo_truth.csv                           ground truth for demo_golden.wav:
+                                                     start_frame,end_frame,species,class
 Preprocessing is identical to chiroset_features.py (sr_eff = sampling_rate x time expansion,
 resample to 256 kHz, float -> int16, no normalisation), so the detector sees what training saw.
 Only clips where bat_model's detector finds >= --min-calls calls are used.
 """
-import argparse, os, wave
+import argparse, os, pickle, wave
 from fractions import Fraction
 import numpy as np
 import pandas as pd
@@ -38,6 +40,23 @@ def load(path, sr_eff_manifest, seconds):
     return np.clip(np.round(y * 32767), -32768, 32767).astype(np.int16)
 
 
+SHORT = {"Cnephaeus serotinus": "CNESER", "Rhinolophus ferrumequinum": "RHIFER",
+         "Rhinolophus hipposideros": "RHIHIP", "Rhinolophus euryale": "RHIEUR",
+         "Rhinolophus mehelyi": "RHIMEH", "Rhinolophus blasii": "RHIBLA",
+         "Miniopterus schreibersii": "MINSCH"}
+
+
+def class_of(latin, classes):
+    """Latin name -> class name in tree.pkl (same codes as train_from_features.py; merged
+    classes like 'PIPKUH/PIPNAT' match either code; anything else -> OTHER)."""
+    g, s = (latin.split() + [""])[:2]
+    c = SHORT.get(latin, (g[:3] + s[:3]).upper())
+    for k in classes:
+        if c in k.split("/"):
+            return k
+    return "OTHER" if "OTHER" in classes else c
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("manifest")
@@ -60,8 +79,9 @@ def main():
         for fn in files:
             index.setdefault(fn.lower(), os.path.join(root, fn))
 
+    classes = pickle.load(open("tree.pkl", "rb"))["classes"]
     os.makedirs(a.out, exist_ok=True)
-    golden = []
+    golden, truth, pos = [], [], 0
     for sp in species:
         rows = m[m.latin == sp].sample(frac=1, random_state=0)
         done = False
@@ -80,7 +100,10 @@ def main():
             name = f"{sp.replace(' ', '_')}_{r.chiroset_id}.wav"
             write_wav(os.path.join(a.out, name), x)
             g = x[: int(a.golden_seconds * FS)]
-            golden.append(np.concatenate([g, np.zeros(FS // 20, np.int16)]))   # 50 ms gap
+            seg = np.concatenate([g, np.zeros(FS // 20, np.int16)])           # 50 ms gap
+            golden.append(seg)
+            truth.append((pos // 256, (pos + len(seg)) // 256, sp.replace(" ", "_"), class_of(sp, classes)))
+            pos += len(seg)
             print(f"{sp:28s} {name}  {len(x) / FS:.1f} s, {n} calls (held-out test split)")
             done = True
             break
@@ -89,6 +112,9 @@ def main():
     if golden:
         g = np.concatenate(golden)
         write_wav("golden/demo_golden.wav", g)
+        with open("golden/demo_truth.csv", "w") as f:
+            f.write("start_frame,end_frame,species,class\n")
+            f.writelines(f"{a_},{b_},{sp_},{c_}\n" for a_, b_, sp_, c_ in truth)
         print(f"golden/demo_golden.wav: {len(g) / FS:.1f} s from {len(golden)} species")
 
 
