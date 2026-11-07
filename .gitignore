@@ -1,1 +1,17 @@
 .DS_Store
+
+# Python virtual environments
+venv/
+.venv/
+env/
+__pycache__/
+
+# Audio data (16 GB+), keep out of git; download from the dataset links in datasets.md
+audio/
+data/
+batfpga/data/
+*.wav
+*.WAV
+*.flac
+*.zip
+!batfpga/golden/*.wav
