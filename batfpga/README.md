@@ -31,7 +31,7 @@ make lint
 `make sim` takes FFT magnitudes from Python, so it checks only the post-FFT logic. `make sim_top` runs the whole chain from int16 audio.
 
 ## FFT core (rtl/fft256.v)
-This is an iterative radix-2 FFT built for low power. It has one butterfly unit (4 multipliers) and one 256×44-bit dual-port RAM. Each frame takes 256 load cycles, 3072 butterfly cycles and 128 output cycles, about 3456 cycles in total. Real time therefore needs only about **3.5 MHz**: at 100 MHz the core runs about 29× faster than real time and sits idle the rest of the time.
+This is an iterative radix-2 FFT built for low power. It has one butterfly unit (4 multipliers) and two copies of a 256×44-bit simple dual-port RAM, so it can read both butterfly inputs in one cycle. Every RAM in the design goes through `sdp_ram.v`, which matches Vivado's UG901 template. Each frame takes 256 load cycles, 4096 butterfly cycles (4 per butterfly) and 128 output cycles, 4480 cycles in total. Real time therefore needs only about **4.5 MHz**: at 50 MHz the core runs about 11× faster than real time and sits idle the rest of the time.
 - `fft_model.py` is a bit-exact integer model of the core: 4 guard bits, Q16 twiddles, a rounded /2 at every stage. It stays within ±2 LSB of the float `bat_model.fft_mags()`.
 - On the synthetic golden stream, events from the RTL FFT match the float-FFT reference 46/46, with every feature identical.
 - `in_ready` goes low while a frame is computing. That is fine for audio fed from BRAM/DDR, but a live 256 kHz ADC needs a FIFO of at least 256 samples in front.
@@ -44,7 +44,7 @@ The decision tree is **programmable**: `tree_walker.v` walks a node table (`gold
 git clone … && cd batfpga
 vivado -mode batch -source vivado/build.tcl     # → overlay/bat.bit, overlay/bat.hwh, overlay/reports/
 ```
-This builds the PS7, an AXI DMA (MM2S) and `bat_axi.v` at FCLK0 = 50 MHz (real time needs about 3.5 MHz). Commit or copy the `overlay/` folder. The script has not been run in Vivado yet, so expect to fix small version-specific Tcl issues on the first run.
+This builds the PS7, an AXI DMA (MM2S) and `bat_axi.v` at FCLK0 = 50 MHz (real time needs about 4.5 MHz). Commit or copy the `overlay/` folder. Tested so far on Vivado 2022.2 with the bare part (no board files).
 
 **2. Prepare the SD card (any laptop):** run `make sdcard`, then copy `sdcard/batfpga/` onto the SD card's FAT boot partition, or onto a USB stick plugged into the board. The folder holds `bat.bit`, `bat.hwh`, `run_bat.py`, `tree.hex`, `classes.txt`, demo audio and the expected events.
 

@@ -26,8 +26,7 @@ module tree_walker #(
     output reg  [3:0]  cls,
     output reg  [7:0]  conf
 );
-    reg [31:0] mem [0:511];
-    reg [31:0] q;
+    wire [31:0] q;
     reg        walking;
     reg [4:0]  steps;
 
@@ -40,10 +39,8 @@ module tree_walker #(
     wire [8:0]  child   = (fval <= thr) ? left : right;
     wire [8:0]  raddr   = start ? 9'd0 : child;
 
-    always @(posedge clk) begin
-        if (we) mem[waddr] <= wdata;
-        q <= mem[raddr];
-    end
+    sdp_ram #(.W(32), .AW(9)) u_tab (.clk(clk), .we(we), .waddr(waddr), .wdata(wdata),
+                                     .raddr(raddr), .rdata(q));
 
     always @(posedge clk) begin
         if (rst) begin

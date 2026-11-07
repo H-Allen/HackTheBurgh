@@ -1,10 +1,12 @@
 // fft256.v - low-power iterative 256-pt FFT front end. Bit-exact with fft_model.fft_mags_fixed().
 //
-// One radix-2 butterfly unit (4 multipliers), one 256 x 44-bit dual-port RAM.
+// One radix-2 butterfly unit (4 multipliers). Working memory = two identical copies of a
+// 256 x 44-bit simple dual-port RAM (sdp_ram.v, Vivado template): both copies are written by the
+// same single write port, so each butterfly can read a and b in one cycle from separate copies.
 // Per 256-sample frame:  LOAD 256 cycles (Hann window, bit-reversed write)
-//                        8 stages x 128 butterflies x 3 cycles = 3072 cycles
-//                        OUT 129 cycles (bins 0..127, mag = |re|+|im|)
-// ~3460 cycles per 1 ms frame -> real time needs only ~3.5 MHz; at 100 MHz it runs ~29x
+//                        8 stages x 128 butterflies x 4 cycles (RD, MUL, WR_A, WR_B) = 4096
+//                        OUT 128 cycles (bins 0..127, mag = |re|+|im|)
+// ~4480 cycles per 1 ms frame -> real time needs only ~4.5 MHz; at 50 MHz it runs ~11x
 // faster than real time and idles the rest (clock-gate / lower the clock for power).
 //
 // Input: int16 samples with valid/ready (ready is low while computing; feed from BRAM/DDR,
@@ -26,26 +28,22 @@ module fft256 (
     localparam integer DW   = 22;   // fft_model.DW
     localparam integer FRAC = 4;    // fft_model.FRAC
 
-    localparam [2:0] S_LOAD = 3'd0, S_RD = 3'd1, S_MUL = 3'd2, S_WR = 3'd3, S_OUT = 3'd4;
+    localparam [2:0] S_LOAD = 3'd0, S_RD = 3'd1, S_MUL = 3'd2, S_WRA = 3'd3, S_WRB = 3'd4,
+                     S_OUT = 3'd5;
     reg [2:0] state;
     reg [7:0] cnt;                 // LOAD: sample index; OUT: bin index
     reg [2:0] stage;
     reg [6:0] bf;                  // butterfly index within stage
 
-    // ---------------- dual-port RAM {re, im} ----------------
-    reg  [2*DW-1:0] mem [0:255];
-    reg  [7:0]      addr_a, addr_b;
-    reg             we_a, we_b;
-    reg  [2*DW-1:0] din_a, din_b;
-    reg  [2*DW-1:0] dout_a, dout_b;
-    always @(posedge clk) begin
-        if (we_a) mem[addr_a] <= din_a;
-        dout_a <= mem[addr_a];
-    end
-    always @(posedge clk) begin
-        if (we_b) mem[addr_b] <= din_b;
-        dout_b <= mem[addr_b];
-    end
+    // ---------------- working memory {re, im}: 2 copies, 1 shared write port ----------------
+    reg  [7:0]      waddr, raddr_a, raddr_b;
+    reg             we;
+    reg  [2*DW-1:0] wdata;
+    wire [2*DW-1:0] dout_a, dout_b;
+    sdp_ram #(.W(2*DW), .AW(8)) u_ram_a (.clk(clk), .we(we), .waddr(waddr), .wdata(wdata),
+                                         .raddr(raddr_a), .rdata(dout_a));
+    sdp_ram #(.W(2*DW), .AW(8)) u_ram_b (.clk(clk), .we(we), .waddr(waddr), .wdata(wdata),
+                                         .raddr(raddr_b), .rdata(dout_b));
 
     // ---------------- load: window + bit-reverse ----------------
     wire signed [15:0] hann;
@@ -98,20 +96,15 @@ module fft256 (
     reg  [6:0] out_pend_bin;
 
     always @(*) begin
-        addr_a = 8'd0; addr_b = 8'd0; we_a = 1'b0; we_b = 1'b0;
-        din_a = {2*DW{1'b0}}; din_b = {2*DW{1'b0}};
+        waddr = 8'd0; raddr_a = 8'd0; raddr_b = 8'd0; we = 1'b0; wdata = {2*DW{1'b0}};
         case (state)
             S_LOAD: begin
-                addr_a = cnt_rev; din_a = {xw_ext, {DW{1'b0}}};
-                we_a = in_valid;
+                waddr = cnt_rev; wdata = {xw_ext, {DW{1'b0}}}; we = in_valid;
             end
-            S_RD, S_MUL: begin addr_a = i1; addr_b = i2; end
-            S_WR: begin
-                addr_a = i1; addr_b = i2; we_a = 1'b1; we_b = 1'b1;
-                din_a = {sr[DW:1], si[DW:1]};
-                din_b = {dr[DW:1], di[DW:1]};
-            end
-            S_OUT: addr_a = cnt;
+            S_RD:  begin raddr_a = i1; raddr_b = i2; end
+            S_WRA: begin waddr = i1; we = 1'b1; wdata = {sr[DW:1], si[DW:1]}; end
+            S_WRB: begin waddr = i2; we = 1'b1; wdata = {dr[DW:1], di[DW:1]}; end
+            S_OUT: raddr_a = cnt;
             default: ;
         endcase
     end
@@ -141,9 +134,10 @@ module fft256 (
                     ar <= dout_a[2*DW-1:DW]; ai <= dout_a[DW-1:0];
                     p_rc <= br * c_r; p_is <= bi * s_r;
                     p_rs <= br * s_r; p_ic <= bi * c_r;
-                    state <= S_WR;
+                    state <= S_WRA;
                 end
-                S_WR: begin
+                S_WRA: state <= S_WRB;            // p_*, ar, ai held: results stay valid
+                S_WRB: begin
                     bf <= bf + 7'd1;
                     state <= S_RD;
                     if (bf == 7'd127) begin

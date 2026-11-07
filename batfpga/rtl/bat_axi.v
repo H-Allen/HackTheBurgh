@@ -110,19 +110,18 @@ module bat_axi (
     end
 
     // ---------------- event FIFO (BRAM, head register always shows mem[rd]) ----------------
-    reg  [107:0]  fmem [0:(1<<FAW)-1];
     reg  [FAW:0]  wp, rp;
-    reg  [107:0]  head;
+    wire [107:0]  head;
     reg           ovf;
     reg           pop, fclr;
     wire [FAW:0]  fcount = wp - rp;
     wire          fempty = (fcount == 0);
     wire          ffull  = (fcount == (1 << FAW));
     wire [FAW:0]  rp_next = fclr ? wp : (pop & ~fempty) ? rp + 1'b1 : rp;
-    always @(posedge aclk) begin
-        if (ev_valid & ~ffull) fmem[wp[FAW-1:0]] <= {ev_frame, ev_class, ev_conf, ev_feats};
-        head <= fmem[rp_next[FAW-1:0]];
-    end
+    sdp_ram #(.W(108), .AW(FAW)) u_fifo (
+        .clk(aclk), .we(ev_valid & ~ffull), .waddr(wp[FAW-1:0]),
+        .wdata({ev_frame, ev_class, ev_conf, ev_feats}),
+        .raddr(rp_next[FAW-1:0]), .rdata(head));
     always @(posedge aclk) begin
         if (~aresetn) begin
             wp <= 0; rp <= 0; ovf <= 1'b0;

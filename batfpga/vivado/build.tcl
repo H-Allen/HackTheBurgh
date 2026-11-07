@@ -11,7 +11,7 @@
 # The decision tree is NOT in the bitstream: run_bat.py loads golden/tree.hex at run time.
 # Tested in Verilator (make sim_axi); this script has not yet been run in Vivado.
 
-set fclk_mhz 50 ;# real time needs ~3.5 MHz; 50 MHz gives ~14x margin and easy timing
+set fclk_mhz 50 ;# real time needs ~4.5 MHz; 50 MHz gives ~11x margin and easy timing
 
 set root     [file normalize [file join [file dirname [info script]] ..]]
 set proj_dir [file join $root vivado proj]
@@ -28,7 +28,7 @@ if {$bp ne ""} {
     puts "INFO: PYNQ-Z2 board files not installed; using bare part $part (fine for a PYNQ overlay)"
 }
 
-set rtl {bat_axi.v bat_top.v fft256.v fft256_rom.v bat_features.v bat_tree.v tree_walker.v}
+set rtl {bat_axi.v bat_top.v fft256.v fft256_rom.v bat_features.v bat_tree.v tree_walker.v sdp_ram.v}
 foreach f $rtl { add_files -norecurse [file join $root rtl $f] }
 update_compile_order -fileset sources_1
 

@@ -3,7 +3,7 @@
 # make golden   - regenerate ROMs, bat_tree.v and golden vectors from tree.pkl
 PY ?= .venv/bin/python
 VFLAGS = --cc --exe --build -O2 -Wno-fatal -Wno-WIDTH -Irtl
-POST = rtl/bat_features.v rtl/bat_tree.v rtl/tree_walker.v
+POST = rtl/bat_features.v rtl/bat_tree.v rtl/tree_walker.v rtl/sdp_ram.v
 FFT  = rtl/bat_top.v rtl/fft256.v rtl/fft256_rom.v
 
 .PHONY: sim sim_top sim_tree sim_axi test golden lint clean sdcard
@@ -20,7 +20,7 @@ sim_axi:
 	verilator $(VFLAGS) --top-module bat_axi -Mdir obj_dir_axi rtl/bat_axi.v $(FFT) $(POST) sim/tb_axi.cpp -o tb_axi > /dev/null
 	./obj_dir_axi/tb_axi golden/audio.hex golden/tree.hex golden/expected_events_fixedfft.txt
 sim_tree:
-	verilator $(VFLAGS) --top-module tree_eq -Mdir obj_dir_tree sim/tree_eq.v rtl/tree_walker.v rtl/bat_tree.v sim/tb_tree.cpp -o tb_tree > /dev/null
+	verilator $(VFLAGS) --top-module tree_eq -Mdir obj_dir_tree sim/tree_eq.v rtl/tree_walker.v rtl/bat_tree.v rtl/sdp_ram.v sim/tb_tree.cpp -o tb_tree > /dev/null
 	./obj_dir_tree/tb_tree golden/tree.hex
 sim:
 	verilator $(VFLAGS) --top-module bat_features $(POST) sim/tb_bat.cpp -o tb_bat > /dev/null
