@@ -326,9 +326,23 @@ function draw() {
   const ly = Math.max(yh + 22, 22);
   cx.fillText(label, W - cx.measureText(label).width - 16, ly);
   cx.font = "13px sans-serif"; cx.fillStyle = "rgba(255,255,255,.6)";
+  // frequency axis: as recorded shows the real frequency; pitched/slowed down the labels count
+  // down to what you actually hear (each divided by 10)
+  const div = 1 + 9 * (bandKHz - 20) / (128 - 20);          // 1 -> 10, in step with the band
+  cx.font = "bold 14px sans-serif";
   for (const k of [20, 40, 60, 80, 100, 120]) {
-    const y = (1 - k / 128) * H;
-    cx.fillRect(0, y, 6, 1); cx.fillText(k + " kHz", 9, y + 4);
+    const y = (1 - k / 128) * H, v = k / div;
+    const txt = (v >= 9.95 ? Math.round(v) : v.toFixed(1).replace(/\.0$/, "")) + " kHz";
+    cx.fillStyle = "rgba(0,0,0,.55)"; cx.fillRect(4, y - 10, cx.measureText(txt).width + 12, 20);
+    cx.fillStyle = div > 1.05 ? "rgba(160,230,255,.95)" : "rgba(255,255,255,.75)";
+    cx.fillRect(0, y, 6, 1); cx.fillText(txt, 10, y + 5);
+  }
+  if (div > 1.05) {
+    const tag = "frequencies shown as heard (divided by 10)";
+    cx.font = "bold 13px sans-serif";
+    const tw = cx.measureText(tag).width, tx = (W - tw) / 2;
+    cx.fillStyle = "rgba(0,0,0,.55)"; cx.fillRect(tx - 6, 6, tw + 12, 22);
+    cx.fillStyle = "rgba(160,230,255,.95)"; cx.fillText(tag, tx, 22);
   }
   if (clip && clfOn) {
     const lastLabel = {};                            // declutter: one label per species per ~90 px
