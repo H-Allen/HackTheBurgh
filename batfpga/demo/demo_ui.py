@@ -17,7 +17,8 @@ Two buttons per clip:
                board streams at real time.
   x10 slow   - laptop plays it 10x slowed (time expansion: 20-110 kHz -> 2-11 kHz, audible);
                board streams 10x slower so the detections line up with what you hear.
---fake runs without a board: the "FPGA" detections are replayed from expected_events (testing only).
+--fake runs without a board: detections come from the bit-exact Python model of the FPGA
+(identical output to the board), replayed in time with the audio. Good for rehearsing.
 """
 import argparse, glob, json, os, queue, re, sys, threading, time, wave
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
@@ -173,16 +174,36 @@ class Board:
 
 
 class FakeBoard:
-    """No hardware: replays expected events at the right time (UI testing only)."""
+    """No hardware: computes what the FPGA would output with the bit-exact Python model
+    (fixed-point FFT + detector + tree.hex walk) and replays it in time with the audio."""
     def __init__(self, clips_dir, broadcast):
         self.broadcast, self.ready, self.clips_dir = broadcast, True, clips_dir
-        p = os.path.join(clips_dir, "expected_events_fixedfft.txt")
-        self.exp = [list(map(int, l.split())) for l in open(p)] if os.path.exists(p) else []
+        self.cache = {}
+
+    def events(self, clip):
+        if clip not in self.cache:
+            sys.path.insert(0, os.path.join(HERE, ".."))
+            from bat_model import frame_stats, detect
+            from fft_model import fft_mags_fixed
+            tab = [int(l, 16) for l in open(os.path.join(self.clips_dir, "tree.hex")) if l.strip()]
+            def walk(f):                                       # same as tree_walker.v
+                n = 0
+                while not tab[n] >> 31:
+                    w = tab[n]
+                    n = (w & 0x1FF) if f[(w >> 28) & 7] <= ((w >> 20) & 0xFF) else ((w >> 9) & 0x1FF)
+                return (tab[n] >> 8) & 0xF, tab[n] & 0xFF
+            x, _ = read_wav(os.path.join(self.clips_dir, clip))
+            evs = []
+            for st, en, f in detect(*frame_stats(fft_mags_fixed(x.astype(np.int16)))):
+                c, conf = walk(f)
+                evs.append([en, c, conf] + list(f))
+            self.cache[clip] = evs
+        return self.cache[clip]
 
     def play(self, clip, speed):
         def run():
+            evs = self.events(clip)
             self.broadcast(dict(type="start", clip=clip, speed=speed))
-            evs = self.exp if clip == "audio.wav" else []
             t0 = time.time()
             for v in evs:
                 time.sleep(max(0, v[0] / 1000 * speed - (time.time() - t0)))
@@ -194,6 +215,10 @@ class FakeBoard:
 
 # ---------------------------------------------------------------- web server
 def main():
+    try:                                    # Windows console: never crash on odd characters
+        sys.stdout.reconfigure(errors="replace"); sys.stderr.reconfigure(errors="replace")
+    except Exception:
+        pass
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", help="serial port of the board (Mac /dev/tty.usbserial-XXXX1, Windows COM5)")
     ap.add_argument("--clips", default=os.path.join(HERE, "..", "sdcard", "batfpga_eu"),

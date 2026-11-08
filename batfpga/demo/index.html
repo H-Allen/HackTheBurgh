@@ -132,7 +132,7 @@ async function init() {
     .filter(r => !seen.has(r) && seen.add(r))
     .map(r => `<span><i style="background:${riskOf(r)[0]}"></i>${riskOf(r)[1]}</span>`).join("");
   document.getElementById("foot").textContent = st.fake
-    ? "TEST MODE (--fake): detections replayed from Python, no board connected."
+    ? "NO-BOARD MODE (--fake): detections from the bit-exact Python model of the FPGA, no board connected."
     : "Detections come from the PYNQ-Z2 FPGA over USB serial, as it streams the same recording from its SD card.";
   setPill(st.ready ? "FPGA ready" : "waiting for FPGA…", st.ready);
   select(0);
