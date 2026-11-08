@@ -143,7 +143,7 @@ const HINT = {
 const css = v => getComputedStyle(document.documentElement).getPropertyValue(v.slice(4, -1)).trim();
 const riskOf = r => RISK[r] || RISK.other_bat;
 
-let st = null, clip = null, calls = [], playing = false, mode = "real", clfOn = false, boardRun = false;
+let st = null, clip = null, calls = [], playing = false, mode = "real", clfOn = false, boardRun = false, bandKHz = 20;
 const audio = new Audio();
 const img = new Image();
 const cv = document.getElementById("spec"), cx = cv.getContext("2d");
@@ -307,13 +307,24 @@ function draw() {
       cx.globalAlpha = 1;
     }
   }
-  // human hearing band (0-20 kHz)
-  const yh = (1 - 20 / 128) * H;
-  cx.fillStyle = "rgba(77,210,255,.10)"; cx.fillRect(0, yh, W, H - yh);
-  cx.strokeStyle = "rgba(77,210,255,.7)"; cx.setLineDash([6, 6]); cx.lineWidth = 1.5;
-  cx.beginPath(); cx.moveTo(0, yh); cx.lineTo(W, yh); cx.stroke(); cx.setLineDash([]);
+  // human hearing band: 0-20 kHz as recorded; pitched/slowed down /10 -> everything below
+  // 200 kHz is audible, so the band rises to cover the whole 0-128 kHz view (animated)
+  const target = mode === "real" ? 20 : 128;
+  bandKHz += (target - bandKHz) * 0.08;
+  if (Math.abs(target - bandKHz) < 0.05) bandKHz = target;
+  const yh = (1 - bandKHz / 128) * H;
+  cx.fillStyle = mode === "real" ? "rgba(77,210,255,.10)" : "rgba(77,210,255,.07)";
+  cx.fillRect(0, yh, W, H - yh);
+  if (bandKHz < 127) {
+    cx.strokeStyle = "rgba(77,210,255,.75)"; cx.setLineDash([6, 6]); cx.lineWidth = 1.5;
+    cx.beginPath(); cx.moveTo(0, yh); cx.lineTo(W, yh); cx.stroke(); cx.setLineDash([]);
+  }
   cx.fillStyle = "rgba(160,230,255,.95)"; cx.font = "bold 15px sans-serif";
-  cx.fillText("human hearing (below 20 kHz)", W - 250, yh + 22);
+  const label = mode === "real" ? "human hearing (below 20 kHz)"
+              : mode === "pitch" ? "pitched down 10×: every call is now within human hearing"
+              : "slowed down 10×: every call is now within human hearing";
+  const ly = Math.max(yh + 22, 22);
+  cx.fillText(label, W - cx.measureText(label).width - 16, ly);
   cx.font = "13px sans-serif"; cx.fillStyle = "rgba(255,255,255,.6)";
   for (const k of [20, 40, 60, 80, 100, 120]) {
     const y = (1 - k / 128) * H;
