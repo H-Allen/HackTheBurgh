@@ -1,0 +1,7 @@
+start_frame,end_frame,species,class
+0,2500,Pipistrellus_pipistrellus,PIPPIP
+3700,6200,Nyctalus_noctula,NYCNOC
+7400,9900,Cnephaeus_serotinus,CNESER
+11100,13600,Miniopterus_schreibersii,MINSCH
+14800,17300,Rhinolophus_ferrumequinum,RHIFER
+18500,21000,Rhinolophus_euryale,RHIEUR

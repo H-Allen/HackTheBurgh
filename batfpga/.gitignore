@@ -5,7 +5,8 @@ __pycache__/
 *.vcd
 *.fst
 .DS_Store
-sdcard/
+sdcard/*
+!sdcard/batfpga_eu/
 vivado/proj/
 .Xil/
 *.jou

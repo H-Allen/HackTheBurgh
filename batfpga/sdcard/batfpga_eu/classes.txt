@@ -1,0 +1,12 @@
+0 CNESER EBLV1_reservoir
+1 MINSCH Lloviu_reservoir
+2 MYOCAP other_bat
+3 NYCNOC other_bat
+4 PIPKUH/PIPNAT other_bat
+5 PIPPIP other_bat
+6 RHIBLA SARSr-CoV_reservoir
+7 RHIEUR SARSr-CoV_reservoir
+8 RHIFER SARSr-CoV_reservoir
+9 RHIHIP SARSr-CoV_reservoir
+10 RHIMEH SARSr-CoV_reservoir
+11 OTHER other_bat

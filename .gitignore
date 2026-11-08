@@ -15,3 +15,4 @@ batfpga/data/
 *.flac
 *.zip
 !batfpga/golden/*.wav
+!batfpga/sdcard/batfpga_eu/*.wav
