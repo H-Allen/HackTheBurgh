@@ -13,11 +13,11 @@ There are certain bat species in certain locations that carry risk. As such, if 
 ### Ecological Applications
 As bats make up 20% of all mammalian species, understanding the effect of anthropogenic climate change and human land use on their distribution is paramount to the success of wildlife conservation efforts. Additionally, identification of species with a high risk of displacement will enable more responsible policy and urban planning decisions.
 
-
-Our solution is a decision tree implemented on an FPGA We have Trained our classification decision tree on 
-
-
 It's important to do background research on resevoir species and determine which ones in which regions are most likely to carry these diseases. We have identified *Pteroptera spp.*, *Rhinolophus spp.*, and *Rousettus spp.* as reservoirs of Henipaviruses, Coronaviruses, and Marburg viruses, respectively. These species can be found around the world but are concentrated in key areas of concern such as Western Africa and South/Southeast Asia. By training our model on accessible data from European relatives, we will present a proof-of-concept system that could be applied to these regions for public health surveillance and ecological applications.
+
+### Implementation Details
+Our solution is a decision tree implemented on an FPGA. We have Trained our classification decision tree on 
+
 
 
 
