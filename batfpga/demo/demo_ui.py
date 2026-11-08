@@ -331,7 +331,7 @@ def main():
                         except queue.Empty:
                             self.wfile.write(b": ping\n\n")
                         self.wfile.flush()
-                except (BrokenPipeError, ConnectionResetError):
+                except OSError:                     # client went away (incl. WinError 10053)
                     pass
                 finally:
                     with clients_lock:
