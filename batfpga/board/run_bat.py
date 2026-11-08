@@ -13,7 +13,8 @@ On the board (serial console):
         PLAY <file.wav> [speed]     stream file paced at real time x speed (10 = 10x slowed down)
         STOP                        abort the current PLAY
         QUIT
-      prints READY, START <file> <speed> <samples>, CSV call lines, END <calls>
+      prints READY, START <file> <speed> <samples>, CSV call lines, STATS <samples> <cycles> <fft_busy>
+      <fclk_MHz> (hardware counters), END <calls>
 
 stdout: frame_idx,class_id,confidence,dur,f_start,f_end,f_peak,f_min,f_max,bw,sweep
 stderr: species names, stats, PASS/FAIL (so stdout stays clean CSV for the dashboard).
@@ -212,6 +213,8 @@ def main():
             reset_core(); events.clear()
             print(f"START {os.path.basename(path)} {speed:g} {len(x)}", flush=True)
             stream(x, speed, 0.02, quiet=True, can_stop=True)
+            smp, cyc, busy = bat.read(SAMPLES), bat.read(CYCLES), bat.read(BUSY)
+            print(f"STATS {smp} {cyc} {busy} {fclk:.2f}", flush=True)   # read from the FPGA's registers
             print(f"END {len(events)}", flush=True)
         return
 

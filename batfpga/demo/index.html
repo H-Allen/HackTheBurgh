@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>BatFPGA live</title>
+<title>Bat Call Classifier</title>
 <style>
   :root {
     --bg: #0d1117; --panel: #161b22; --line: #30363d; --text: #e6edf3; --muted: #8b949e;
@@ -87,6 +87,20 @@
   @keyframes fadein { from { opacity: 0; transform: translateY(-4px); } }
   .legend { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 10px; font-size: 12px; color: var(--muted); }
   .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+  #link { margin-top: 14px; border: 1px solid var(--line); border-radius: 8px; background: #0a0c0f; }
+  #link .hd { display: flex; justify-content: space-between; align-items: center; padding: 7px 10px;
+              border-bottom: 1px solid var(--line); font-size: 12px; color: var(--muted); }
+  #link .hd b { color: var(--text); font-weight: 600; }
+  #raw { font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: #7ee2b8;
+         height: 118px; overflow: hidden; padding: 6px 10px; white-space: pre; }
+  #raw .dim { color: #5c6470; }
+  #hw { font-size: 12.5px; color: var(--muted); padding: 7px 10px; border-top: 1px solid var(--line); min-height: 20px; }
+  #hw b { color: var(--text); }
+  .pill.live { color: #fff; background: rgba(63,185,80,.18); border-color: var(--ok); font-weight: 600; }
+  .pill.sim { color: #ffd28a; border-color: #d29922; background: rgba(210,153,34,.12); font-weight: 600; }
+  .pill .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--ok); margin-right: 6px;
+               animation: blink 1.4s infinite; }
+  @keyframes blink { 50% { opacity: .25; } }
   footer { padding: 0 20px 16px; color: var(--muted); font-size: 12px; display: flex; gap: 24px; flex-wrap: wrap; }
   kbd { border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; font-size: 11px; }
   @media (max-width: 1100px) { main { grid-template-columns: 1fr; } }
@@ -95,7 +109,7 @@
 <body>
 <header>
   <div>
-    <h1>BatFPGA: listening for disease-reservoir bats</h1>
+    <h1>Bat Call Classifier: listening for disease-reservoir bats</h1>
     <div class="sub">FFT → call detector → 8 integer features → decision tree, all in FPGA logic</div>
   </div>
   <div id="pill" class="pill">connecting…</div>
@@ -122,6 +136,11 @@
     </div>
     <div class="hint" id="hint"></div>
     <div class="legend" id="legend"></div>
+    <div id="link">
+      <div class="hd"><span id="linkTitle">Raw output from the FPGA</span><span id="linkPort"></span></div>
+      <div id="raw"><span class="dim">waiting for the first run…</span></div>
+      <div id="hw"></div>
+    </div>
   </section>
 
   <section class="panel">
@@ -180,6 +199,8 @@ async function init() {
   document.getElementById("legend").innerHTML = Object.values(st.classes).map(c => c.risk)
     .filter(r => !seen.has(r) && seen.add(r))
     .map(r => `<span><i style="background:${riskOf(r)[0]}"></i>${riskOf(r)[1]}</span>`).join("");
+  document.getElementById("linkPort").textContent = st.fake ? "simulated (--fake)" : `USB serial · ${st.port} · 115200 baud`;
+  document.getElementById("linkTitle").textContent = st.fake ? "Simulated output (bit-exact Python model of the FPGA)" : "Raw output from the FPGA";
   document.getElementById("foot").textContent = st.fake
     ? "NO-BOARD MODE (--fake): detections from the bit-exact Python model of the FPGA."
     : "Detections come live from the PYNQ-Z2 FPGA over USB, as it streams the same recording from its SD card.";
@@ -192,8 +213,15 @@ async function init() {
 
 function setPill(t, ready) {
   const p = document.getElementById("pill");
-  p.textContent = t; p.className = "pill" + (ready ? " ready" : "");
+  if (st.fake) { p.innerHTML = "SIMULATED · no board connected"; p.className = "pill sim"; }
+  else if (ready) { p.innerHTML = `<span class="dot"></span>LIVE · FPGA on ${st.port} · ${t}`; p.className = "pill live"; }
+  else { p.textContent = t; p.className = "pill"; }
   st.ready = ready;
+}
+const rawLines = [];
+function rawLine(t) {
+  rawLines.push(t); while (rawLines.length > 6) rawLines.shift();
+  document.getElementById("raw").textContent = rawLines.join("\n");
 }
 
 function setMode(m) {
@@ -310,6 +338,14 @@ function truthAt(frame) {
 
 function onMsg(m) {
   if (m.type === "status") setPill(m.msg === "connected" ? (m.ready ? "FPGA ready" : "waiting for FPGA…") : m.msg, m.ready);
+  if (m.type === "raw") rawLine(m.line);
+  if (m.type === "start") document.getElementById("hw").innerHTML = "FPGA streaming…";
+  if (m.type === "stats") {
+    const frames = m.samples / 256, perFrame = frames ? m.busy / frames + 256 : 0, rt = m.fclk * 1e6 / (perFrame * 1000);
+    document.getElementById("hw").innerHTML = `Read from the FPGA's own counters: <b>${m.samples.toLocaleString()}</b> samples ` +
+      `(${(m.samples / 256000).toFixed(1)} s of audio) · <b>${Math.round(perFrame).toLocaleString()}</b> clock cycles per 1 ms frame · ` +
+      `clock <b>${m.fclk.toFixed(1)} MHz</b> → could run <b>${rt.toFixed(1)}×</b> faster than real time`;
+  }
   if (m.type === "end" && playing && boardRun) { boardDone = true; maybeFinish(); }
   if (m.type === "call" && playing && boardRun) {
     const c = st.classes[m.cls] || { code: "?" + m.cls, name: "class " + m.cls, risk: "other_bat" };

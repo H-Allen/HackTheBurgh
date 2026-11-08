@@ -188,6 +188,12 @@ class Board:
                     line += ch
 
     def handle(self, line):
+        if CSV.match(line) or line.split(" ")[0] in ("START", "END", "STATS", "READY"):
+            self.broadcast(dict(type="raw", line=line))           # shown verbatim in the page console
+        if line.startswith("STATS "):
+            p = line.split()
+            self.broadcast(dict(type="stats", samples=int(p[1]), cycles=int(p[2]), busy=int(p[3]), fclk=float(p[4])))
+            return
         if CSV.match(line):
             v = list(map(int, line.split(",")))
             self.broadcast(dict(type="call", frame=v[0], cls=v[1], conf=v[2], dur=v[3], f_start=v[4],
@@ -245,6 +251,7 @@ class FakeBoard:
         me = self.run_id
         def run():
             evs = self.events(clip)
+            self.broadcast(dict(type="raw", line="(simulated - no board connected)"))
             self.broadcast(dict(type="start", clip=clip, speed=speed))
             t0 = time.time()
             for v in evs:
@@ -308,7 +315,7 @@ def main():
             if path == "/":
                 return self.send_bytes(open(os.path.join(HERE, "index.html"), "rb").read(), "text/html; charset=utf-8")
             if path == "/api/state":
-                st = dict(ready=board.ready, fake=a.fake, clips=clips, classes=classes)
+                st = dict(ready=board.ready, fake=a.fake, port=a.port, clips=clips, classes=classes)
                 return self.send_bytes(json.dumps(st).encode(), "application/json")
             if path.startswith("/media/"):
                 f = os.path.join(cache, os.path.basename(path))
@@ -331,7 +338,7 @@ def main():
                         except queue.Empty:
                             self.wfile.write(b": ping\n\n")
                         self.wfile.flush()
-                except (BrokenPipeError, ConnectionResetError):
+                except OSError:                     # client went away (incl. WinError 10053)
                     pass
                 finally:
                     with clients_lock:
