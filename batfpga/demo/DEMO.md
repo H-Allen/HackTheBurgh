@@ -23,8 +23,8 @@ Open **http://localhost:8000**. With the board, close PuTTY/screen first and wai
 **Controls:** **Play/Stop** (Space) · listening mode **As recorded / Pitched down / Slowed down** (keys 1/2/3) · **FPGA classifier** switch (C). The mode and the switch apply to the next Play.
 
 ## Suggested flow
-1. **Hidden frequencies (classifier off).** Select **Demo mix (15 s)**.
-   - Play in **As recorded**: "That's a real recording of 12 European bat species. You heard almost nothing." The spectrogram fills in as it plays: "Everything above the dashed line is above human hearing."
+1. **Hidden frequencies (classifier off).** Select **Demo mix** (21 s: 6 species covering every risk group, one natural pass each, with pauses between).
+   - Play in **As recorded**: "Those are real recordings of 6 European bat species. You heard almost nothing." The spectrogram fills in as it plays: "Everything above the dashed line is above human hearing."
    - Play in **Pitched down**: every frequency is divided by 10 with the timing kept, so now you hear the calls, in step with the picture. "Each species has its own call shape: horseshoe bats hold a constant tone at 80–110 kHz, pipistrelles sweep down to about 45 kHz."
 2. **Why it matters:** switch tabs to the disease and simulation dashboard.
 3. **Back to the demo: switch the FPGA classifier on** (C), then Play in **Pitched down**. "The FPGA is now streaming the same recording from its SD card in real time, and every box is a call it has classified." Red boxes and the banner mark SARS-related-coronavirus reservoir species, orange marks Lloviu virus, and purple marks lyssavirus. The ✓/✗ counter compares each answer with the species label of the held-out recording.
@@ -34,7 +34,7 @@ Open **http://localhost:8000**. With the board, close PuTTY/screen first and wai
 - The classifier logic is estimated at about **11 mW** (Vivado vectorless estimate, `overlay/reports/power_hier.txt`). The ARM processor that drives the demo is about 1.5 W and wouldn't be needed in a field sensor.
 - It needs about **4,480 clock cycles per 1 ms of audio**, so real time takes only about 4.5 MHz. Quote the cycles/frame line `run_bat.py` prints on the board.
 - The board output is **bit-exact** with the Python model (self-test PASS on real hardware).
-- Labels vs. the held-out recordings (real data, bit-exact Python model = FPGA): **54/74** calls on the short self-test mix (confirmed on the board), **154/199** on the 15 s demo mix.
+- Labels vs. the held-out recordings (real data, bit-exact Python model = FPGA): **54/74** calls on the short self-test mix (confirmed on the board), **146/164** species and **148/164** risk group on the 21 s demo mix. On all held-out test calls: 86% species, 99% risk group.
 
 ## How a field sensor would listen continuously
 The FPGA pipeline already processes an endless stream: 1 ms frames, with an adaptive noise floor in the detector. It has no notion of a "file". In the field:

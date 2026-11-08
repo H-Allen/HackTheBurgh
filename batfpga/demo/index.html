@@ -63,7 +63,20 @@
   .clf-off #off { display: block; }
   .clf-off #live { display: none; }
   .clf-off #truth { opacity: 0; }
-  #feed { max-height: 470px; overflow-y: auto; }
+  #feed { max-height: 230px; overflow-y: auto; }
+  #now { border: 1px solid var(--line); border-left: 6px solid var(--line); border-radius: 8px;
+         padding: 10px 12px; margin-bottom: 12px; transition: border-color .3s; }
+  #now .lbl { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .6px; }
+  #now .sp { font-size: 22px; font-weight: 700; margin: 2px 0; }
+  #now .rk { font-size: 13px; }
+  .stat.small b { font-size: 16px; }
+  #tally { margin-bottom: 12px; }
+  .tl { display: grid; grid-template-columns: 1fr 34px; gap: 8px; align-items: center; margin: 4px 0; font-size: 13px; }
+  .tl .tb { height: 18px; border-radius: 3px; position: relative; background: rgba(255,255,255,.05); }
+  .tl .tb span { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 3px; opacity: .85; }
+  .tl .tb em { position: absolute; left: 8px; top: 0; line-height: 18px; font-style: normal; color: #fff;
+               text-shadow: 0 1px 2px rgba(0,0,0,.8); white-space: nowrap; }
+  .tl .tn { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
   .ev { display: grid; grid-template-columns: 8px 1fr auto; gap: 10px; align-items: center;
         padding: 7px 4px; border-bottom: 1px solid var(--line); animation: fadein .25s; }
   .ev .bar { width: 8px; height: 34px; border-radius: 3px; }
@@ -115,11 +128,14 @@
     <div id="off"><b>FPGA classifier is off</b>Turn it on, and the FPGA classifies every call it hears: species, confidence and disease-risk group.</div>
     <div id="live">
       <div id="alert"></div>
+      <div id="now"><div class="lbl">Now hearing</div><div class="sp" id="nowSp">listening…</div><div class="rk" id="nowRk">&nbsp;</div></div>
       <div class="stats">
-        <div class="stat"><b id="nCalls">0</b><span>calls classified by the FPGA</span></div>
-        <div class="stat"><b id="nOk">–</b><span>species correct (vs. recording label)</span></div>
+        <div class="stat"><b id="nRisk">–</b><span>risk group correct</span></div>
+        <div class="stat small"><b id="nOk">–</b><span>species correct · <span id="nCalls">0</span> calls</span></div>
       </div>
-      <h2>FPGA output (live)</h2>
+      <h2>Detected in this recording</h2>
+      <div id="tally"></div>
+      <h2>FPGA output, call by call</h2>
       <div id="feed"></div>
     </div>
   </section>
@@ -154,7 +170,7 @@ async function init() {
   st.clips.forEach((c, i) => {
     const b = document.createElement("button");
     const mix = c.truth.length > 1;
-    const label = c.name === "demo_mix.wav" ? "Demo mix (15 s)" : c.name === "audio.wav" ? "Short mix (self-test)" :
+    const label = c.name === "demo_mix.wav" ? "Demo mix" : c.name === "audio.wav" ? "Short mix (self-test)" :
                   (c.truth[0] ? c.truth[0].species : c.name);
     b.innerHTML = `${label}<small>${c.dur.toFixed(1)} s · ${mix ? c.truth.length + " species" : c.truth[0]?.cls || ""}</small>`;
     b.onclick = () => select(i);
@@ -209,9 +225,41 @@ function select(i) {
 
 function resetPanel() {
   document.getElementById("feed").innerHTML = "";
+  document.getElementById("tally").innerHTML = "";
   document.getElementById("nCalls").textContent = "0";
   document.getElementById("nOk").textContent = "–";
+  document.getElementById("nRisk").textContent = "–";
   document.getElementById("alert").className = "";
+  setNow(null);
+}
+
+// "Now hearing": confidence-weighted vote over the calls in the last 1.5 s of audio - what a
+// field sensor would report, robust to single-call mistakes
+function setNow(c) {
+  const el = document.getElementById("now");
+  document.getElementById("nowSp").textContent = c ? c.name : "listening…";
+  document.getElementById("nowRk").textContent = c ? riskOf(c.risk)[1] : "\u00a0";
+  document.getElementById("nowRk").style.color = c ? riskOf(c.risk)[0] : "";
+  el.style.borderLeftColor = c ? riskOf(c.risk)[0] : "var(--line)";
+}
+let nowKey = null;
+function updateNow() {
+  if (!clfOn || !clip) return;
+  const cur = progress() * clip.frames;
+  const votes = {};
+  for (const m of calls) if (m.frame <= cur + 50 && m.frame > cur - 1500) votes[m.cls] = (votes[m.cls] || 0) + m.conf;
+  const best = Object.keys(votes).sort((a, b) => votes[b] - votes[a])[0];
+  if (best !== nowKey) { nowKey = best; setNow(best === undefined ? null : st.classes[best]); }
+}
+function renderTally() {
+  const n = {};
+  for (const m of calls) n[m.cls] = (n[m.cls] || 0) + 1;
+  const keys = Object.keys(n).sort((a, b) => n[b] - n[a]);
+  const max = Math.max(1, ...Object.values(n));
+  document.getElementById("tally").innerHTML = keys.map(k => {
+    const c = st.classes[k] || { name: "class " + k, risk: "other_bat" };
+    return `<div class="tl"><div class="tb"><span style="width:${n[k] / max * 100}%;background:${riskOf(c.risk)[0]}"></span><em>${c.name}</em></div><div class="tn">${n[k]}</div></div>`;
+  }).join("");
 }
 
 let played = false, fastTest = false, audioDone = false, boardDone = false, t0 = 0, runDur = 1;
@@ -266,6 +314,8 @@ function onMsg(m) {
   if (m.type === "call" && playing && boardRun) {
     const c = st.classes[m.cls] || { code: "?" + m.cls, name: "class " + m.cls, risk: "other_bat" };
     m.c = c; m.truth = truthAt(m.frame); m.ok = m.truth ? m.truth.cls === c.code : null;
+    const tr = m.truth ? Object.values(st.classes).find(k => k.code === m.truth.cls) : null;
+    m.rok = tr ? tr.risk === c.risk : null;
     calls.push(m);
     addFeed(m);
     if (c.risk !== "other_bat" && c.risk !== "noise" && m.conf >= 150) showAlert(m);
@@ -276,14 +326,15 @@ function addFeed(m) {
   const d = document.createElement("div");
   d.className = "ev";
   const [col, rname] = riskOf(m.c.risk);
-  const mark = m.ok === null ? "" : m.ok ? `<span class="ok">✓</span>` : `<span class="bad">✗ ${m.truth.cls}</span>`;
   d.innerHTML = `<div class="bar" style="background:${col}"></div>
     <div><div class="nm">${m.c.name}</div><div class="meta">${(m.frame / 1000).toFixed(3)} s · ${m.f_max}→${m.f_min} kHz · ${m.dur} ms · ${rname}</div></div>
-    <div class="cf">${Math.round(m.conf / 2.55)}%<br>${mark}</div>`;
+    <div class="cf">${Math.round(m.conf / 2.55)}%</div>`;
   document.getElementById("feed").prepend(d);
   document.getElementById("nCalls").textContent = calls.length;
-  const judged = calls.filter(c => c.ok !== null);
-  if (judged.length) document.getElementById("nOk").textContent = `${judged.filter(c => c.ok).length}/${judged.length}`;
+  const js = calls.filter(c => c.ok !== null), jr = calls.filter(c => c.rok !== null);
+  if (js.length) document.getElementById("nOk").textContent = `${js.filter(c => c.ok).length}/${js.length}`;
+  if (jr.length) document.getElementById("nRisk").textContent = `${Math.round(100 * jr.filter(c => c.rok).length / jr.length)}%`;
+  renderTally();
 }
 
 function showAlert(m) {
@@ -362,6 +413,7 @@ function draw() {
   if (playing) {
     cx.fillStyle = "rgba(255,255,255,.9)"; cx.fillRect(p * W - 1, 0, 2, H);
   }
+  updateNow();
   requestAnimationFrame(draw);
 }
 

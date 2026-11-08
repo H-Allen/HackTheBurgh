@@ -74,7 +74,9 @@ def pitch_down(x, div=10, fs_out=48000):
     off = np.clip(0.5 * (a - c) / np.where(a - 2 * b + c == 0, -1e-9, a - 2 * b + c), -0.5, 0.5)
     f = (15 + k + off) * 1000.0 / div                          # Hz after division
     db = 20 * np.log10(pk + 1e-9)
-    amp = np.clip((db - np.median(db) - 8) / 25, 0, 1) ** 1.5  # gate the noise floor
+    live = pk > pk.max() * 1e-4                               # ignore digital silence (gaps)
+    floor = np.median(db[live]) if live.any() else db.max()
+    amp = np.clip((db - floor - 8) / 25, 0, 1) ** 1.5 * live   # gate the noise floor
     t_frames = (hop * np.arange(m) + n / 2) / FS
     t_out = np.arange(int(len(x) / FS * fs_out)) / fs_out
     fo = np.interp(t_out, t_frames, f)
