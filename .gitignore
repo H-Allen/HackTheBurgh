@@ -16,3 +16,4 @@ batfpga/data/
 *.zip
 !batfpga/golden/*.wav
 !batfpga/sdcard/batfpga_eu/*.wav
+!batfpga/demo/presentation_audio/*.wav
