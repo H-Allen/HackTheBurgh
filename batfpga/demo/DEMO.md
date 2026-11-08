@@ -34,7 +34,7 @@ Open **http://localhost:8000**. With the board, close PuTTY/screen first and wai
 - The classifier logic is estimated at about **11 mW** (Vivado vectorless estimate, `overlay/reports/power_hier.txt`). The ARM processor that drives the demo is about 1.5 W and wouldn't be needed in a field sensor.
 - It needs about **4,480 clock cycles per 1 ms of audio**, so real time takes only about 4.5 MHz. Quote the cycles/frame line `run_bat.py` prints on the board.
 - The board output is **bit-exact** with the Python model (self-test PASS on real hardware).
-- On the held-out demo mix it labels **54/74 calls** correctly (real data).
+- Labels vs. the held-out recordings (real data, bit-exact Python model = FPGA): **54/74** calls on the short self-test mix (confirmed on the board), **154/199** on the 15 s demo mix.
 
 ## How a field sensor would listen continuously
 The FPGA pipeline already processes an endless stream: 1 ms frames, with an adaptive noise floor in the detector. It has no notion of a "file". In the field:
