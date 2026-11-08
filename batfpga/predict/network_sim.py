@@ -185,17 +185,22 @@ def main():
     def truth_at(truth, pts_xy):
         return truth[np.argmin(np.linalg.norm(gxy[None] - pts_xy[:, None], axis=2), axis=1)]
 
-    def sensor_sites(n, rng):
-        from sklearn.cluster import KMeans
-        km = KMeans(n_clusters=n, n_init=3, random_state=int(rng.integers(1e9))).fit(gxy)
-        return gxy[[np.argmin(np.linalg.norm(gxy - c, axis=1)) for c in km.cluster_centers_]]
+    def sensor_order(rng, n_max=1000):
+        """nested space-filling layout (farthest-point sampling over land cells): the first N sites
+        are the N-sensor network, so networks grow by adding sensors, never moving them."""
+        idx = [int(rng.integers(len(gxy)))]
+        d = np.linalg.norm(gxy - gxy[idx[0]], axis=1)
+        for _ in range(n_max - 1):
+            i = int(np.argmax(d)); idx.append(i)
+            d = np.minimum(d, np.linalg.norm(gxy - gxy[i], axis=1))
+        return gxy[idx]
 
     def evaluate(truth, hot_cell, undisc, mean, sd):
         p_high = 1 - norm.cdf((logit(HIGH) - mean) / sd)         # P(share > HIGH)
         flagged = p_high > 0.7                                    # confidently high risk
         found = flagged[hot_cell]
         high = truth > HIGH
-        return dict(
+        return dict(found=found,
             hot_found=float(found.mean()), undiscovered_found=float(found[undisc].mean()),
             known_found=float(found[~undisc].mean()),
             high_area_flagged_pct=float(100 * flagged[high].mean()) if high.any() else 0.0,
@@ -203,14 +208,14 @@ def main():
             false_alarm_area_pct=float(100 * (flagged & (truth < 0.2)).mean()),
             rmse=float(np.sqrt(np.mean((sigm(mean) - truth) ** 2))))
 
-    def run(rng, truth, hot_cell, undisc, n_sensors, nights, sens, spec, with_current=True, keep=False):
+    def run(rng, truth, hot_cell, undisc, sxy, nights, sens, spec, with_current=True, keep=False):
+        n_sensors = 0 if sxy is None else len(sxy)
         obs = []
         if with_current:                                           # today: real record locations
             lab = rng.random(len(rec_ll)) < truth_at(truth, rxy)
             sx, k, n = aggregate(rec_ll, lab)
             obs.append(site_obs(sx, k, n))
         if n_sensors:
-            sxy = sensor_sites(n_sensors, rng)
             r = truth_at(truth, sxy)
             q = sens * r + (1 - spec) * (1 - r)                    # P(sensor says "horseshoe")
             npass = nights * PASSES_PER_NIGHT
@@ -223,8 +228,9 @@ def main():
             X, y, v = np.zeros((0, 2)), np.zeros(0), np.zeros(0)
         mean, sd = gp_predict(X, y, v, gxy, mu0)
         res = evaluate(truth, hot_cell, undisc, mean, sd)
+        found = res.pop("found")
         if keep:
-            res.update(mean=mean, sd=sd, sensors=sxy if n_sensors else None)
+            res.update(mean=mean, sd=sd, sensors=sxy if n_sensors else None, found=found)
         return res
 
     # ---------------- 3-5. scenarios ----------------
@@ -234,16 +240,18 @@ def main():
     for seed in range(SEEDS):
         rng = np.random.default_rng(seed)
         truth, hot_xy, hot_cell, undisc = make_world(rng)
+        order = sensor_order(np.random.default_rng([seed, 999]))
         for n in N_LIST:
             for clf, (se, sp) in [("FPGA classifier", (SENS, SPEC)), ("perfect classifier", (1.0, 1.0))]:
                 if n == 0 and clf != "FPGA classifier":
                     continue
                 crn = np.random.default_rng([seed, n])      # same placement + draws for both classifiers
                 rows.append(dict(seed=seed, sensors=n, nights=30, clf=clf,
-                                 **run(crn, truth, hot_cell, undisc, n, 30, se, sp)))
+                                 **run(crn, truth, hot_cell, undisc, order[:n] if n else None, 30, se, sp)))
         for nt in NIGHTS:
             rows.append(dict(seed=seed, sensors=N_NIGHTS, nights=nt, clf="FPGA classifier", sweep="nights",
-                             **run(rng, truth, hot_cell, undisc, N_NIGHTS, nt, SENS, SPEC)))
+                             **run(np.random.default_rng([seed, 7, nt]), truth, hot_cell, undisc,
+                                   order[:N_NIGHTS], nt, SENS, SPEC)))
     R = pd.DataFrame(rows)
     R["sweep"] = R.get("sweep").fillna("sensors")
     agg = R.groupby(["sweep", "clf", "sensors", "nights"]).mean(numeric_only=True).drop(columns="seed")
@@ -288,8 +296,10 @@ def main():
     ex_seed = int(sub.iloc[len(sub) // 2].seed)
     rng = np.random.default_rng(ex_seed)
     truth, hot_xy, hot_cell, undisc = make_world(rng)
-    today = run(np.random.default_rng([ex_seed, 0]), truth, hot_cell, undisc, 0, 30, SENS, SPEC, keep=True)
-    net = run(np.random.default_rng([ex_seed, N_MAP]), truth, hot_cell, undisc, N_MAP, 30, SENS, SPEC, keep=True)
+    ex_order = sensor_order(np.random.default_rng([ex_seed, 999]))
+    frames = {n: run(np.random.default_rng([ex_seed, n]), truth, hot_cell, undisc, ex_order[:n] if n else None,
+                     30, SENS, SPEC, keep=True) for n in N_LIST}
+    today, net = frames[0], frames[N_MAP]
     print(f"example map: test world {ex_seed} (median); undiscovered found {net['undiscovered_found']:.2f}")
     fig, ax = plt.subplots(1, 3, figsize=(17, 6.2))
     hll = np.c_[hot_xy[:, 1] / KM, hot_xy[:, 0] / KM / COSLAT]
@@ -345,6 +355,42 @@ def main():
         results=[dict(zip(["sweep", "clf", "sensors", "nights"], k), **{c: round(v, 4) for c, v in r.items()})
                  for k, r in agg.iterrows()])
     json.dump(out, open(os.path.join(HERE, "results.json"), "w"), indent=1)
+
+    # ---------------- data for the interactive visual (predict/viz) ----------------
+    ii, jj = np.where(land)
+    def u8(v):
+        return np.clip(np.round(np.asarray(v) * 255), 0, 255).astype(int).tolist()
+    def ll(pts_xy):
+        return [[round(p[1] / KM, 3), round(p[0] / KM / COSLAT, 3)] for p in pts_xy]
+    rings = []
+    for r in outlines:
+        r = r[::2] if len(r) > 60 else r
+        if (r[:, 0].max() < REGION["lon"][0] - 1 or r[:, 0].min() > REGION["lon"][1] + 1 or
+                r[:, 1].max() < REGION["lat"][0] - 1 or r[:, 1].min() > REGION["lat"][1] + 1):
+            continue
+        rings.append(np.round(r, 3).tolist())
+    fa = agg.loc["sensors"].loc["FPGA classifier"].reset_index()
+    viz = dict(
+        region=REGION, grid=GRID, rows=int(LAT.shape[0]), cols=int(LAT.shape[1]),
+        cells=np.c_[ii, jj].tolist(), known=known, example_world=ex_seed, seeds=SEEDS,
+        truth=u8(truth), outlines=rings,
+        records=[[round(a, 3), round(b, 3), int(c)] for a, b, c in
+                 m[["latitude", "longitude", "res"]].round(3).drop_duplicates().values],
+        roosts=[dict(lat=p[0], lon=p[1], hidden=bool(h)) for p, h in zip(ll(hot_xy), undisc)],
+        sensors=ll(ex_order),
+        frames=[dict(n=int(n), share=u8(sigm(f["mean"])), unc=u8(np.clip((f["sd"] - 0.4) / 0.8, 0, 1)),
+                     found=[bool(x) for x in f["found"]],
+                     undiscovered_found=round(f["undiscovered_found"], 3),
+                     unknown_area_pct=round(f["unknown_area_pct"], 1),
+                     high_area_flagged_pct=round(f["high_area_flagged_pct"], 1)) for n, f in frames.items()],
+        averages=[dict(n=int(r.sensors), undiscovered_found=round(r.undiscovered_found, 3),
+                       unknown_area_pct=round(r.unknown_area_pct, 1),
+                       high_area_flagged_pct=round(r.high_area_flagged_pct, 1)) for r in fa.itertuples()],
+        assumptions=out["assumptions"])
+    os.makedirs(os.path.join(HERE, "viz"), exist_ok=True)
+    with open(os.path.join(HERE, "viz", "data.js"), "w") as f:
+        f.write("window.VIZ = " + json.dumps(viz, separators=(",", ":")) + ";\n")
+    print("viz data:", os.path.getsize(os.path.join(HERE, "viz", "data.js")) // 1024, "KB")
     print("figures in", OUT)
 
 

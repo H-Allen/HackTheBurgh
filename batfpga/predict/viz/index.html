@@ -1,0 +1,407 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sensor Network Reveal</title>
+<style>
+  :root {
+    --surface-0: #0c0d10; --surface-1: #15171c; --line: #2a2e36;
+    --text-primary: #f0efec; --text-secondary: #c3c2b7; --text-muted: #8b8f98;
+    --series-1: #3987e5;   /* blue   - unknown area / known roosts */
+    --series-2: #d95926;   /* orange - undiscovered roosts found */
+    --series-3: #199e70;   /* aqua   - high-risk area mapped / sensors */
+    --sensor-glow: #33d6a0;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--surface-0); color: var(--text-primary);
+    font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif; }
+  .wrap { max-width: 1480px; margin: 0 auto; padding: 22px 28px 28px; }
+  .eyebrow { font-size: 12px; letter-spacing: 2.4px; text-transform: uppercase; color: var(--sensor-glow); font-weight: 650; }
+  h1 { font-size: 34px; line-height: 1.12; margin: 6px 0 4px; font-weight: 720; letter-spacing: -.4px; }
+  .sub { color: var(--text-secondary); font-size: 15px; margin-bottom: 18px; }
+  .grid { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 22px; align-items: start; }
+  .card { background: var(--surface-1); border: 1px solid var(--line); border-radius: 14px; }
+  .mapcard { padding: 14px; position: relative; }
+  .maptop { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; gap: 12px; flex-wrap: wrap; }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 9px; overflow: hidden; }
+  .seg button { background: transparent; color: var(--text-muted); border: 0; padding: 8px 14px; font: inherit;
+    font-size: 13px; cursor: pointer; border-right: 1px solid var(--line); }
+  .seg button:last-child { border-right: 0; }
+  .seg button.on { background: rgba(255,255,255,.07); color: var(--text-primary); font-weight: 600; }
+  .scene { font-size: 13px; color: var(--text-secondary); }
+  .scene b { color: var(--text-primary); }
+  #map { display: block; margin: 0 auto; border-radius: 10px; background: #08090b; cursor: crosshair; }
+  #tip { position: absolute; pointer-events: none; background: rgba(12,13,16,.92); border: 1px solid var(--line);
+    border-radius: 8px; padding: 7px 10px; font-size: 12px; color: var(--text-secondary); display: none; white-space: nowrap; }
+  #tip b { color: var(--text-primary); font-size: 13px; }
+  .legend { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; font-size: 12px; color: var(--text-secondary); margin-top: 10px; }
+  .ramp { width: 150px; height: 10px; border-radius: 3px;
+    background: linear-gradient(90deg, #281a1e, #6e2630, #d64a3c, #f58c5a, #ffd6a0); }
+  .key { display: inline-flex; align-items: center; gap: 6px; }
+  .fogkey { width: 22px; height: 12px; border-radius: 3px; background: repeating-linear-gradient(45deg, #9aa3b0 0 2px, #5a616c 2px 5px); opacity: .8; }
+  .controls { display: flex; align-items: center; gap: 16px; margin-top: 14px; }
+  #play { width: 46px; height: 46px; border-radius: 50%; border: 1px solid var(--sensor-glow); background: rgba(51,214,160,.12);
+    color: var(--text-primary); font-size: 17px; cursor: pointer; flex: none; }
+  .slider { flex: 1; position: relative; padding-top: 4px; }
+  input[type=range] { width: 100%; accent-color: var(--sensor-glow); margin: 0; }
+  .ticks { display: flex; justify-content: space-between; font-size: 12px; color: var(--text-muted); margin-top: 6px; font-variant-numeric: tabular-nums; }
+  .ticks span.on { color: var(--text-primary); font-weight: 650; }
+  .count { font-size: 13px; color: var(--text-secondary); min-width: 150px; text-align: right; }
+  .count b { font-size: 22px; color: var(--text-primary); font-variant-numeric: tabular-nums; display: block; line-height: 1.1; }
+
+  .side { display: flex; flex-direction: column; gap: 14px; }
+  .stat { padding: 16px 18px; }
+  .stat .lbl { font-size: 12px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; font-weight: 600; }
+  .stat .big { font-size: 46px; font-weight: 750; letter-spacing: -1px; line-height: 1.05; margin: 4px 0 2px; font-variant-numeric: tabular-nums; }
+  .stat .note { font-size: 12.5px; color: var(--text-secondary); }
+  .stat .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: 0; }
+  .stars { display: flex; gap: 4px; margin-top: 8px; flex-wrap: wrap; }
+  .stars i { width: 16px; height: 16px; display: inline-block; clip-path: polygon(50% 0, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%);
+    background: #3a3f48; transition: background .4s, transform .4s; }
+  .stars i.on { background: var(--text-primary); transform: scale(1.12); }
+  .chart { padding: 14px 16px 10px; }
+  .chart h3 { margin: 0 0 2px; font-size: 13px; font-weight: 650; }
+  .chart .hint { font-size: 12px; color: var(--text-muted); margin-bottom: 4px; }
+  #chart { width: 100%; height: 190px; display: block; overflow: visible; }
+  details { font-size: 12px; color: var(--text-secondary); margin-top: 4px; }
+  details table { border-collapse: collapse; width: 100%; margin-top: 6px; font-variant-numeric: tabular-nums; }
+  details td, details th { border-bottom: 1px solid var(--line); padding: 3px 4px; text-align: right; }
+  details th:first-child, details td:first-child { text-align: left; }
+  .now { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; background: var(--line); border-radius: 14px; overflow: hidden; margin-top: 22px; border: 1px solid var(--line); }
+  .now div { background: var(--surface-1); padding: 14px 16px; }
+  .now b { display: block; font-size: 26px; font-weight: 720; font-variant-numeric: tabular-nums; }
+  .now span { font-size: 12.5px; color: var(--text-secondary); }
+  .now .tag { grid-column: 1 / -1; font-size: 12px; letter-spacing: 1.6px; text-transform: uppercase; color: var(--text-muted); padding: 10px 16px; font-weight: 600; }
+  .foot { color: var(--text-muted); font-size: 12px; margin-top: 14px; line-height: 1.5; }
+  @media (max-width: 1100px) { .grid { grid-template-columns: 1fr; } .now { grid-template-columns: 1fr 1fr; } h1 { font-size: 26px; } }
+  @media (max-width: 560px) { .wrap { padding: 16px; } .now { grid-template-columns: 1fr; } .stat .big { font-size: 36px; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="eyebrow">BatFPGA · Prediction</div>
+  <h1>What a network of bat sensors would reveal</h1>
+  <div class="sub">Greece &amp; Bulgaria · predicted share of bat activity from horseshoe bats, the SARS-related coronavirus reservoirs</div>
+
+  <div class="grid">
+    <div class="card mapcard">
+      <div class="maptop">
+        <div class="seg" id="view">
+          <button data-v="pred" class="on">Prediction</button>
+          <button data-v="truth">Test world (truth)</button>
+        </div>
+        <div class="scene" id="scene"></div>
+      </div>
+      <canvas id="map"></canvas>
+      <div id="tip"></div>
+      <div class="legend">
+        <span class="key"><span>low</span><span class="ramp"></span><span>high horseshoe share</span></span>
+        <span class="key"><span class="fogkey"></span>risk unknown</span>
+        <span class="key"><svg width="12" height="12"><circle cx="6" cy="6" r="4" fill="#33d6a0"/></svg>FPGA sensor</span>
+        <span class="key"><svg width="12" height="12"><rect x="2" y="2" width="8" height="8" transform="rotate(45 6 6)" fill="#3987e5"/></svg>known roost</span>
+        <span class="key"><svg width="14" height="14"><polygon points="7,1 8.6,5.4 13,5.4 9.4,8.2 10.8,12.6 7,10 3.2,12.6 4.6,8.2 1,5.4 5.4,5.4" fill="#f0efec"/></svg>undiscovered roost, found</span>
+        <span class="key"><svg width="14" height="14"><circle cx="7" cy="7" r="5" fill="none" stroke="#8b8f98" stroke-dasharray="2 2"/></svg>still hidden</span>
+      </div>
+      <div class="controls">
+        <button id="play" title="Play (space)">▶</button>
+        <div class="slider">
+          <input type="range" id="slider" min="0" max="6" step="1" value="0">
+          <div class="ticks" id="ticks"></div>
+        </div>
+        <div class="count"><b id="nsens">0</b>FPGA sensors</div>
+      </div>
+    </div>
+
+    <div class="side">
+      <div class="card stat">
+        <div class="lbl"><span class="swatch" style="background:var(--series-1)"></span>Area where risk is unknown</div>
+        <div class="big" id="sUnknown">–</div>
+        <div class="note" id="nUnknown"></div>
+      </div>
+      <div class="card stat">
+        <div class="lbl"><span class="swatch" style="background:var(--series-2)"></span>Undiscovered roosts found</div>
+        <div class="big" id="sRoost">–</div>
+        <div class="stars" id="stars"></div>
+        <div class="note" id="nRoost" style="margin-top:6px"></div>
+      </div>
+      <div class="card stat">
+        <div class="lbl"><span class="swatch" style="background:var(--series-3)"></span>High-risk area mapped</div>
+        <div class="big" id="sHigh">–</div>
+        <div class="note" id="nHigh"></div>
+      </div>
+      <div class="card chart">
+        <h3>As the network grows</h3>
+        <div class="hint" id="chartHint"></div>
+        <svg id="chart" role="img" aria-label="Percent versus number of sensors for three measures"></svg>
+        <details><summary>Data table</summary><table id="table"></table></details>
+      </div>
+    </div>
+  </div>
+
+  <div class="now" id="now"></div>
+  <div class="foot" id="foot"></div>
+</div>
+
+<script src="data.js"></script>
+<script>
+const V = window.VIZ;
+const STEPS = V.frames.map(f => f.n);
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const fmt = n => n.toLocaleString("en-GB");
+
+// ---------------- geometry ----------------
+const lat0 = V.region.lat[0], lat1 = V.region.lat[1], lon0 = V.region.lon[0], lon1 = V.region.lon[1];
+const COS = Math.cos((lat0 + lat1) / 2 * Math.PI / 180);
+const cv = document.getElementById("map"), cx = cv.getContext("2d");
+let W = 0, H = 0, DPR = 1;
+function resize() {
+  DPR = Math.min(2, window.devicePixelRatio || 1);
+  const ratio = (lat1 - lat0) / ((lon1 - lon0) * COS);
+  const avail = cv.parentElement.clientWidth - 28;
+  const maxH = Math.max(380, window.innerHeight - 330);          // fit a 16:9 screen
+  H = Math.round(Math.min(avail * ratio, maxH)); W = Math.round(H / ratio);
+  cv.width = W * DPR; cv.height = H * DPR; cv.style.height = H + "px"; cv.style.width = W + "px";
+  cx.setTransform(DPR, 0, 0, DPR, 0, 0);
+}
+const px = lon => (lon - lon0) / (lon1 - lon0) * W;
+const py = lat => (lat1 - lat) / (lat1 - lat0) * H;
+
+// ---------------- colour ramp (semantic heat, one warm family) ----------------
+const RAMP = [[0, 40, 26, 30], [.25, 110, 38, 48], [.5, 214, 74, 60], [.75, 245, 140, 90], [1, 255, 214, 160]];
+function heat(s) {
+  for (let k = 1; k < RAMP.length; k++) if (s <= RAMP[k][0]) {
+    const a = RAMP[k - 1], b = RAMP[k], t = (s - a[0]) / (b[0] - a[0]);
+    return [a[1] + t * (b[1] - a[1]), a[2] + t * (b[2] - a[2]), a[3] + t * (b[3] - a[3])];
+  }
+  return RAMP[RAMP.length - 1].slice(1);
+}
+
+// offscreen grid canvases (1 px per 10-km cell), smoothed when scaled up
+const g = document.createElement("canvas"); g.width = V.cols; g.height = V.rows;
+const gx = g.getContext("2d");
+const fogC = document.createElement("canvas"); fogC.width = V.cols; fogC.height = V.rows;
+const fx = fogC.getContext("2d");
+const layer = document.createElement("canvas"), lx = layer.getContext("2d");
+const noise = document.createElement("canvas"); noise.width = noise.height = 192;
+(() => { const n = noise.getContext("2d"), d = n.createImageData(192, 192);
+  for (let i = 0; i < d.data.length; i += 4) { const v = 120 + Math.random() * 120; d.data[i] = v; d.data[i + 1] = v + 6; d.data[i + 2] = v + 16; d.data[i + 3] = 255; }
+  n.putImageData(d, 0, 0); })();
+
+function paintGrid(share, unc, fogAmt) {
+  const hd = gx.createImageData(V.cols, V.rows), fd = fx.createImageData(V.cols, V.rows);
+  V.cells.forEach(([i, j], k) => {
+    const o = ((V.rows - 1 - i) * V.cols + j) * 4, c = heat(share[k] / 255);
+    hd.data[o] = c[0]; hd.data[o + 1] = c[1]; hd.data[o + 2] = c[2]; hd.data[o + 3] = 255;
+    fd.data[o] = 255; fd.data[o + 1] = 255; fd.data[o + 2] = 255; fd.data[o + 3] = Math.round(unc[k] * fogAmt * 0.86 * 255);
+  });
+  gx.putImageData(hd, 0, 0); fx.putImageData(fd, 0, 0);
+}
+
+// ---------------- state & animation ----------------
+let view = "pred", step = 0, from = 0, t0 = 0, animT = 1, playing = false, lastShown = -1;
+const DUR = 1100;
+const ease = t => t < .5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+const lerpArr = (a, b, t) => a.map((v, i) => v + (b[i] - v) * t);
+const foundAt = {};                                   // roost index -> step it was first found
+V.roosts.forEach((r, i) => { const s = V.frames.findIndex(f => f.found[i]); foundAt[i] = s < 0 ? 99 : s; });
+
+function frameData(t) {
+  const A = V.frames[from], B = V.frames[step];
+  if (view === "truth") return { share: V.truth, unc: V.truth.map(() => 0) };
+  return { share: lerpArr(A.share, B.share, t),
+           unc: lerpArr(A.unc, B.unc, t).map(v => Math.min(1, Math.max(0, (v / 255 - 0.5) / 0.4))) };
+}
+
+function draw(now) {
+  const t = ease(Math.min(1, (now - t0) / DUR));
+  animT = t;
+  const d = frameData(t);
+  paintGrid(d.share, d.unc, view === "truth" ? 0 : 1);
+  cx.clearRect(0, 0, W, H);
+  cx.fillStyle = "#08090b"; cx.fillRect(0, 0, W, H);
+  cx.imageSmoothingEnabled = true; cx.imageSmoothingQuality = "high";
+  cx.drawImage(g, px(lon0), py(lat1), W, H);
+  // fog: smoothed mask filled with drifting grain
+  if (layer.width !== cv.width) { layer.width = cv.width; layer.height = cv.height; }
+  lx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  lx.globalCompositeOperation = "source-over"; lx.clearRect(0, 0, W, H);
+  lx.imageSmoothingEnabled = true; lx.drawImage(fogC, 0, 0, W, H);
+  lx.globalCompositeOperation = "source-in";
+  const off = (now / 60) % 192;
+  lx.fillStyle = lx.createPattern(noise, "repeat");
+  lx.save(); lx.translate(-off, -off * .6); lx.fillRect(off, off * .6, W, H); lx.restore();
+  lx.globalCompositeOperation = "source-over";
+  cx.globalAlpha = .9; cx.drawImage(layer, 0, 0, W, H); cx.globalAlpha = 1;
+  // coastlines / borders
+  cx.strokeStyle = "rgba(200,205,215,.35)"; cx.lineWidth = 1;
+  for (const r of V.outlines) { cx.beginPath(); r.forEach(([lo, la], k) => k ? cx.lineTo(px(lo), py(la)) : cx.moveTo(px(lo), py(la))); cx.stroke(); }
+  // today's recording sites (the existing knowledge)
+  if (view === "pred") {
+    cx.fillStyle = "rgba(57,135,229,.85)";
+    for (const [la, lo] of V.records) { cx.beginPath(); cx.arc(px(lo), py(la), 2, 0, 7); cx.fill(); }
+  }
+  // sensors: grow in, staggered by deployment order
+  const nA = V.frames[from].n, nB = V.frames[step].n, nShow = view === "truth" ? 0 : nA + (nB - nA) * t;
+  const r0 = Math.max(1.6, W / 520);
+  for (let k = 0; k < Math.ceil(nShow); k++) {
+    const [la, lo] = V.sensors[k], x = px(lo), y = py(la);
+    const a = Math.min(1, nShow - k);
+    const grad = cx.createRadialGradient(x, y, 0, x, y, r0 * 4);
+    grad.addColorStop(0, `rgba(51,214,160,${.55 * a})`); grad.addColorStop(1, "rgba(51,214,160,0)");
+    cx.fillStyle = grad; cx.beginPath(); cx.arc(x, y, r0 * 4, 0, 7); cx.fill();
+    cx.fillStyle = `rgba(190,255,232,${a})`; cx.beginPath(); cx.arc(x, y, r0 * a, 0, 7); cx.fill();
+  }
+  // roosts
+  const shownStep = t >= 1 ? step : from;
+  V.roosts.forEach((r, i) => {
+    const x = px(r.lon), y = py(r.lat);
+    if (!r.hidden) { diamond(x, y, 5, "#3987e5"); return; }
+    const found = view === "truth" || foundAt[i] <= shownStep;
+    if (found) {
+      if (view === "pred" && foundAt[i] === step && t < 1) return;
+      star(x, y, 7.5, "#f0efec");
+      if (view === "pred" && foundAt[i] === step) {             // reveal pulse
+        const p = ((now - t0 - DUR) % 1600) / 1600;
+        if (now - t0 - DUR < 3200) { cx.strokeStyle = `rgba(240,239,236,${1 - p})`; cx.lineWidth = 1.5;
+          cx.beginPath(); cx.arc(x, y, 8 + p * 20, 0, 7); cx.stroke(); }
+      }
+    } else {
+      cx.strokeStyle = "rgba(139,143,152,.75)"; cx.setLineDash([2, 3]); cx.lineWidth = 1.2;
+      cx.beginPath(); cx.arc(x, y, 6, 0, 7); cx.stroke(); cx.setLineDash([]);
+    }
+  });
+  if (t >= 1 && lastShown !== step) { lastShown = step; updateStats(); }
+  requestAnimationFrame(draw);
+}
+function diamond(x, y, r, c) { cx.fillStyle = c; cx.strokeStyle = "#08090b"; cx.lineWidth = 1.5; cx.beginPath();
+  cx.moveTo(x, y - r); cx.lineTo(x + r, y); cx.lineTo(x, y + r); cx.lineTo(x - r, y); cx.closePath(); cx.fill(); cx.stroke(); }
+function star(x, y, r, c) { cx.fillStyle = c; cx.strokeStyle = "#08090b"; cx.lineWidth = 1.5; cx.beginPath();
+  for (let k = 0; k < 10; k++) { const a = -Math.PI / 2 + k * Math.PI / 5, rr = k % 2 ? r * .45 : r; cx.lineTo(x + rr * Math.cos(a), y + rr * Math.sin(a)); }
+  cx.closePath(); cx.fill(); cx.stroke(); }
+
+// ---------------- stats & counters ----------------
+const avg = n => V.averages.find(a => a.n === n);
+function countTo(el, target, suffix, dec = 0) {
+  const start = parseFloat(el.dataset.v || 0), t1 = performance.now();
+  const tick = now => { const t = ease(Math.min(1, (now - t1) / 700)), v = start + (target - start) * t;
+    el.textContent = v.toFixed(dec) + suffix; if (t < 1) requestAnimationFrame(tick); else el.dataset.v = target; };
+  requestAnimationFrame(tick);
+}
+function updateStats() {
+  const f = V.frames[step], a = avg(f.n), hidden = V.roosts.filter(r => r.hidden).length;
+  const nFound = f.found.filter((x, i) => x && V.roosts[i].hidden).length;
+  countTo(document.getElementById("sUnknown"), f.unknown_area_pct, "%", f.unknown_area_pct < 10 ? 1 : 0);
+  countTo(document.getElementById("sHigh"), f.high_area_flagged_pct, "%");
+  document.getElementById("sRoost").textContent = `${nFound} / ${hidden}`;
+  document.getElementById("stars").innerHTML = V.roosts.filter(r => r.hidden).map((r, k) => {
+    const i = V.roosts.indexOf(r); return `<i class="${foundAt[i] <= step ? "on" : ""}"></i>`; }).join("");
+  document.getElementById("nUnknown").textContent = `average over ${V.seeds} simulated worlds: ${a.unknown_area_pct}%`;
+  document.getElementById("nRoost").textContent = `average over ${V.seeds} worlds: ${Math.round(a.undiscovered_found * 100)}% · roosts nobody has recorded`;
+  document.getElementById("nHigh").textContent = `of the truly high-risk area, confidently flagged · average ${Math.round(a.high_area_flagged_pct)}%`;
+  document.getElementById("nsens").textContent = fmt(f.n);
+  document.getElementById("scene").innerHTML = view === "truth"
+    ? "<b>The hidden truth</b> in this simulated world"
+    : f.n === 0 ? `<b>Today:</b> ${fmt(V.known.records)} recordings at ${V.known.sites} sites` : `<b>Today's recordings + ${fmt(f.n)} FPGA sensors</b> · 30 nights`;
+  [...document.querySelectorAll("#ticks span")].forEach((s, k) => s.classList.toggle("on", k === step));
+  drawChart();
+}
+
+// ---------------- chart (one % axis, three series) ----------------
+const SERIES = [
+  { key: "unknown_area_pct", name: "Risk unknown", col: "--series-1", f: v => v },
+  { key: "undiscovered_found", name: "Roosts found", col: "--series-2", f: v => v * 100 },
+  { key: "high_area_flagged_pct", name: "High-risk mapped", col: "--series-3", f: v => v },
+];
+function drawChart() {
+  const svg = document.getElementById("chart"), w = svg.clientWidth, h = 190, L = 34, R = 92, T = 8, B = 24;
+  const xs = k => L + k * (w - L - R) / (STEPS.length - 1), ys = v => T + (1 - v / 100) * (h - T - B);
+  let s = "";
+  for (const v of [0, 50, 100]) s += `<line x1="${L}" x2="${w - R}" y1="${ys(v)}" y2="${ys(v)}" stroke="#2a2e36"/>
+    <text x="${L - 6}" y="${ys(v) + 4}" text-anchor="end" font-size="11" fill="#8b8f98">${v}%</text>`;
+  STEPS.forEach((n, k) => s += `<text x="${xs(k)}" y="${h - 6}" text-anchor="middle" font-size="11" fill="${k === step ? "#f0efec" : "#8b8f98"}">${n >= 1000 ? "1k" : n}</text>`);
+  s += `<line x1="${xs(step)}" x2="${xs(step)}" y1="${T}" y2="${h - B}" stroke="#f0efec" stroke-opacity=".35" stroke-dasharray="3 3"/>`;
+  for (const se of SERIES) {
+    const pts = V.averages.map((a, k) => [xs(k), ys(se.f(a[se.key]))]);
+    s += `<polyline points="${pts.map(p => p.join(",")).join(" ")}" fill="none" stroke="${css(se.col)}" stroke-width="2" stroke-linejoin="round"/>`;
+    const p = pts[step];
+    s += `<circle cx="${p[0]}" cy="${p[1]}" r="5" fill="${css(se.col)}" stroke="#15171c" stroke-width="2"/>`;
+    const last = pts[pts.length - 1];
+    s += `<text x="${last[0] + 8}" y="${last[1] + 4}" font-size="11" fill="#c3c2b7">${se.name}</text>`;
+  }
+  STEPS.forEach((n, k) => s += `<rect x="${xs(k) - 14}" y="${T}" width="28" height="${h - T - B}" fill="transparent" data-k="${k}"/>`);
+  svg.innerHTML = s;
+  svg.querySelectorAll("rect[data-k]").forEach(r => {
+    r.addEventListener("mousemove", e => chartTip(e, +r.dataset.k));
+    r.addEventListener("mouseleave", () => tip.style.display = "none");
+    r.addEventListener("click", () => go(+r.dataset.k));
+  });
+  document.getElementById("chartHint").textContent = `average over ${V.seeds} simulated worlds · click a point to jump`;
+}
+const tip = document.getElementById("tip");
+function chartTip(e, k) {
+  const a = V.averages[k];
+  tip.innerHTML = `<b>${fmt(a.n)} sensors</b><br>Risk unknown: ${a.unknown_area_pct}%<br>Roosts found: ${Math.round(a.undiscovered_found * 100)}%<br>High-risk mapped: ${Math.round(a.high_area_flagged_pct)}%`;
+  placeTip(e);
+}
+function placeTip(e) {
+  const host = document.querySelector(".mapcard").getBoundingClientRect();
+  tip.style.display = "block";
+  tip.style.left = Math.min(window.innerWidth - 220, e.clientX + 14) - host.left + "px";
+  tip.style.top = e.clientY + 14 - host.top + "px";
+  tip.style.position = "fixed"; tip.style.left = Math.min(window.innerWidth - 230, e.clientX + 14) + "px"; tip.style.top = e.clientY + 14 + "px";
+}
+cv.addEventListener("mousemove", e => {
+  const r = cv.getBoundingClientRect(), lon = lon0 + (e.clientX - r.left) / W * (lon1 - lon0), lat = lat1 - (e.clientY - r.top) / H * (lat1 - lat0);
+  const i = Math.floor((lat - lat0) / V.grid), j = Math.floor((lon - lon0) / V.grid);
+  const k = V.cells.findIndex(c => c[0] === i && c[1] === j);
+  if (k < 0) { tip.style.display = "none"; return; }
+  const d = frameData(animT), sh = Math.round(d.share[k] / 2.55), un = d.unc[k];
+  tip.innerHTML = view === "truth" ? `<b>${sh}%</b> horseshoe share (truth)`
+    : `<b>${sh}%</b> predicted horseshoe share<br>${un > .5 ? "⚠ risk unknown here" : un > .2 ? "uncertain" : "confident"}`;
+  placeTip(e);
+});
+cv.addEventListener("mouseleave", () => tip.style.display = "none");
+
+// ---------------- controls ----------------
+function go(k) { if (k === step) return; from = view === "truth" ? k : step; step = k; t0 = performance.now(); lastShown = -1;
+  document.getElementById("slider").value = k; }
+document.getElementById("slider").addEventListener("input", e => { stop(); go(+e.target.value); });
+document.getElementById("ticks").innerHTML = STEPS.map(n => `<span>${fmt(n)}</span>`).join("");
+document.querySelectorAll("#view button").forEach(b => b.onclick = () => {
+  view = b.dataset.v; document.querySelectorAll("#view button").forEach(x => x.classList.toggle("on", x === b));
+  from = step; t0 = performance.now() - DUR; lastShown = -1; });
+let timer = null;
+function stop() { playing = false; clearInterval(timer); document.getElementById("play").textContent = "▶"; }
+function play() {
+  if (step === STEPS.length - 1) { from = step; step = 0; t0 = performance.now() - DUR; document.getElementById("slider").value = 0; lastShown = -1; }
+  playing = true; document.getElementById("play").textContent = "❚❚";
+  timer = setInterval(() => { if (step >= STEPS.length - 1) { stop(); return; } go(step + 1); }, 2600);
+}
+document.getElementById("play").onclick = () => playing ? stop() : play();
+document.addEventListener("keydown", e => {
+  if (e.code === "Space") { e.preventDefault(); playing ? stop() : play(); }
+  if (e.key === "ArrowRight") { stop(); go(Math.min(STEPS.length - 1, step + 1)); }
+  if (e.key === "ArrowLeft") { stop(); go(Math.max(0, step - 1)); }
+  if (e.key === "t") document.querySelector(`#view button[data-v="${view === "truth" ? "pred" : "truth"}"]`).click();
+});
+
+// ---------------- static text ----------------
+const K = V.known;
+document.getElementById("now").innerHTML = `<div class="tag">What we know now · real ChirosetEurope records, ${K.region}</div>
+  <div><b>${fmt(K.records)}</b><span>bat recordings, ${K.years}</span></div>
+  <div><b>${K.sites}</b><span>places they were made, across ${fmt(K.land_area_km2)} km²</span></div>
+  <div><b>${K.cells_with_any_record_pct}%</b><span>of 10-km land cells ever recorded · ${K.cells_with_reservoir_record_pct}% with a horseshoe bat</span></div>
+  <div><b>${K.records_jun_aug_pct}%</b><span>of recordings made in June–August; only ${K.records_nov_feb} in Nov–Feb</span></div>`;
+document.getElementById("foot").innerHTML = `Simulation, not measurement. A test world of horseshoe-bat activity is built from the real records, with roosts at real horseshoe-bat sites and in places nobody has recorded. Today's knowledge = the real recording locations; sensors = a nested, evenly spread network listening 30 nights (~${V.assumptions.passes_per_night} bat passes a night), every call classified with the FPGA classifier's measured error rates (sensitivity ${(V.assumptions.sensor_sensitivity * 100).toFixed(1)}%, specificity ${(V.assumptions.sensor_specificity * 100).toFixed(1)}%). One Gaussian-process spatial model predicts every map. Map shows the median of ${V.seeds} simulated worlds; numbers on the right show this map and the average. Data are presence-only citizen-science recordings: shares of recorded activity, not abundance. Keys: space play · ←/→ step · T truth.`;
+document.getElementById("table").innerHTML = `<tr><th>sensors</th><th>risk unknown</th><th>roosts found</th><th>high-risk mapped</th></tr>` +
+  V.averages.map(a => `<tr><td>${fmt(a.n)}</td><td>${a.unknown_area_pct}%</td><td>${Math.round(a.undiscovered_found * 100)}%</td><td>${Math.round(a.high_area_flagged_pct)}%</td></tr>`).join("");
+
+window.addEventListener("resize", () => { resize(); drawChart(); });
+resize(); t0 = performance.now() - DUR; updateStats(); requestAnimationFrame(draw);
+if (location.hash === "#play") setTimeout(play, 600);
+if (location.hash.startsWith("#step")) { const k = +location.hash.slice(5); from = step = k; document.getElementById("slider").value = k; lastShown = -1; }
+if (location.hash === "#truth") document.querySelector('#view button[data-v="truth"]').click();
+</script>
+</body>
+</html>
