@@ -19,11 +19,13 @@ building it:
   5. SCORE against the test world: hotspots found (especially undiscovered ones), area where we
      cannot tell, map error - as a function of the number of sensors and nights.
 
-  python predict/network_sim.py            -> predict/figures/*.png, predict/results.json
-The region is a parameter (REGION); the method transfers to e.g. South-East Asia given records.
-Presence-only citizen-science data: the map is "share of recorded bat activity", not abundance.
+  python predict/network_sim.py [sea|balkans]
+      -> predict/figures/<region>/*.png, predict/results_<region>.json, predict/viz/data_<region>.js
+Regions: "sea" = Laos & Vietnam (GBIF occurrence records, mostly specimens - almost no acoustic data);
+"balkans" = Greece & Bulgaria (ChirosetEurope acoustic recordings).
+Presence-only data: the map is "share of recorded bat activity", not abundance.
 """
-import json, os
+import json, os, sys
 import numpy as np
 import pandas as pd
 import matplotlib
@@ -31,13 +33,23 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.path import Path
 from scipy.stats import norm
+from scipy.spatial import cKDTree
+from scipy.spatial.distance import cdist
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.join(HERE, "..")
-OUT = os.path.join(HERE, "figures")
-
-REGION = dict(name="Greece & Bulgaria", countries=["Greece", "Bulgaria"],
-              lat=(34.8, 44.3), lon=(19.3, 28.7))
+REGIONS = {
+    "sea": dict(key="sea", name="Laos & Vietnam", countries=["Laos", "Vietnam"], lat=(8.3, 23.5), lon=(100.0, 110.0),
+                source="gbif", n_list=[0, 50, 100, 250, 500, 1000, 2000], n_map=1000, n_nights=500,
+                classifier_note="assumes a classifier retrained on South-East Asian bat calls with the same "
+                                "accuracy we measured on European recordings"),
+    "balkans": dict(key="balkans", name="Greece & Bulgaria", countries=["Greece", "Bulgaria"], lat=(34.8, 44.3),
+                    lon=(19.3, 28.7), source="chiroset", n_list=[0, 25, 50, 100, 250, 500, 1000], n_map=500,
+                    n_nights=250, classifier_note="uses our classifier's error rates measured on held-out "
+                                                  "European recordings"),
+}
+REGION = REGIONS[sys.argv[1] if len(sys.argv) > 1 else "sea"]
+OUT = os.path.join(HERE, "figures", REGION["key"])
 GRID = 0.1                         # deg (~10 km cells)
 RESERVOIR = "Rhinolophus"          # SARS-related CoV reservoirs (horseshoe bats)
 # classifier error rates, "horseshoe vs not", per pass, from held-out real data (validation split,
@@ -108,10 +120,9 @@ def site_obs(locs, k, n, sens=1.0, spec=1.0):
 def gp_predict(obs_xy, y, var, grid_xy, mu0):
     if len(y) == 0:
         return np.full(len(grid_xy), mu0), np.full(len(grid_xy), np.sqrt(PRIOR_VAR))
-    d = np.linalg.norm(obs_xy[:, None] - obs_xy[None], axis=2)
-    K = matern32(d) + np.diag(var)
+    K = matern32(cdist(obs_xy, obs_xy)) + np.diag(var)
     L = np.linalg.cholesky(K)
-    Ks = matern32(np.linalg.norm(grid_xy[:, None] - obs_xy[None], axis=2))
+    Ks = matern32(cdist(grid_xy, obs_xy))
     alpha = np.linalg.solve(L.T, np.linalg.solve(L, y - mu0))
     v = np.linalg.solve(L, Ks.T)
     return mu0 + Ks @ alpha, np.sqrt(np.maximum(PRIOR_VAR - (v * v).sum(0), 1e-9))
@@ -133,18 +144,27 @@ def main():
     cell_km2 = (GRID * KM) * (GRID * KM * COSLAT)
 
     # ---------------- 1. what we know now (real records) ----------------
-    m = pd.read_csv(os.path.join(ROOT, "ChirosetEurope_manifest_v1.csv"), low_memory=False)
-    m = m[m.country.isin(REGION["countries"]) & m.latitude.between(*REGION["lat"])
-          & m.longitude.between(*REGION["lon"])].copy()
-    m["res"] = m.latin.str.startswith(RESERVOIR)
-    m["date"] = pd.to_datetime(m.date, errors="coerce")
+    if REGION["source"] == "chiroset":
+        m = pd.read_csv(os.path.join(ROOT, "ChirosetEurope_manifest_v1.csv"), low_memory=False)
+        m = m[m.country.isin(REGION["countries"])].copy()
+        m["date"] = pd.to_datetime(m.date, errors="coerce")
+        m["acoustic"] = True
+        source_note = "ChirosetEurope acoustic recordings"
+    else:
+        m = pd.read_csv(os.path.join(HERE, "data", "gbif_chiroptera_LA_VN.csv"))
+        m["latin"] = m.species.fillna(m.genus).fillna("Chiroptera")
+        m["date"] = pd.to_datetime(dict(year=m.year, month=m.month.fillna(1), day=1), errors="coerce")
+        m["acoustic"] = m.basis.eq("MACHINE_OBSERVATION")
+        source_note = "GBIF occurrence records (GBIF.org, accessed 2026-11-08)"
+    m = m[m.latitude.between(*REGION["lat"]) & m.longitude.between(*REGION["lon"])].copy()
+    m["res"] = m.latin.astype(str).str.startswith(RESERVOIR)
     rec_ll = m[["latitude", "longitude"]].values
     ci = ((m.latitude - REGION["lat"][0]) // GRID).astype(int).clip(0, len(lats) - 1)
     cj = ((m.longitude - REGION["lon"][0]) // GRID).astype(int).clip(0, len(lons) - 1)
     cells_any = set(zip(ci, cj)) & set(zip(*np.where(land)))
     cells_res = set(zip(ci[m.res], cj[m.res])) & set(zip(*np.where(land)))
     months = m.date.dt.month.value_counts().reindex(range(1, 13), fill_value=0)
-    yrs = m.date.dt.year[m.date.dt.year >= 1950]
+    yrs = m.date.dt.year[m.date.dt.year >= 1900]
     known = dict(
         region=REGION["name"], records=int(len(m)), species=int(m.latin.nunique()),
         reservoir_records=int(m.res.sum()), reservoir_species=int(m[m.res].latin.nunique()),
@@ -154,15 +174,20 @@ def main():
         cells_with_reservoir_record_pct=round(100 * len(cells_res) / n_land, 1),
         records_jun_aug_pct=round(100 * months[[6, 7, 8]].sum() / months.sum(), 1),
         records_nov_feb=int(months[[11, 12, 1, 2]].sum()),
-        years=f"{int(yrs.min())}-{int(yrs.max())}", records_per_month=months.to_dict())
+        years=f"{int(yrs.min())}-{int(yrs.max())}", records_per_month=months.to_dict(),
+        acoustic_records=int(m.acoustic.sum()), source=source_note,
+        specimen_records=int(m.get("basis", pd.Series(dtype=str)).isin(["PRESERVED_SPECIMEN", "MATERIAL_SAMPLE"]).sum()))
     print("WHAT WE KNOW NOW:", json.dumps(known, indent=1))
 
     # ---------------- 2. test-world base surface from the real records ----------------
     rxy = xy(rec_ll[:, 0], rec_ll[:, 1])
     mean_share = m.res.mean()
-    w = np.exp(-0.5 * (np.linalg.norm(gxy[:, None] - rxy[None], axis=2) / 30.0) ** 2)
-    base = np.clip((w @ m.res.values + 2 * mean_share) / (w.sum(1) + 2), 0.02, 0.9)
-    dist_to_rec = np.linalg.norm(gxy[:, None] - rxy[None], axis=2).min(1)
+    grid_tree = cKDTree(gxy)
+    rec_cell = grid_tree.query(rxy)[1]                         # nearest land cell of each record
+    sxy0, k0, n0 = aggregate(rec_ll, m.res.values)
+    w = np.exp(-0.5 * (cdist(gxy, sxy0) / 30.0) ** 2)
+    base = np.clip((w @ k0 + 2 * mean_share) / (w @ n0 + 2), 0.02, 0.9)
+    dist_to_rec = cKDTree(sxy0).query(gxy)[0]
     res_sites = np.unique(np.round(rec_ll[m.res.values], 2), axis=0)
     mu0 = logit(mean_share)
 
@@ -172,7 +197,7 @@ def main():
         unk_idx = rng.choice(far, N_HOT - N_HOT // 2, replace=False)
         hot_xy = np.r_[xy(known_h[:, 0], known_h[:, 1]), gxy[unk_idx]]
         z = logit(base)
-        hot_cell = np.array([np.argmin(np.linalg.norm(gxy - h, axis=1)) for h in hot_xy])
+        hot_cell = grid_tree.query(hot_xy)[1]
         sig = rng.uniform(6, 12, N_HOT)                          # roost foraging radius (km)
         # each roost lifts the local horseshoe share to at least ~0.65-0.9
         amp = np.maximum(rng.uniform(2.0, 3.0, N_HOT), logit(rng.uniform(0.65, 0.9, N_HOT)) - z[hot_cell])
@@ -183,7 +208,7 @@ def main():
         return truth, hot_xy, hot_cell, undiscovered
 
     def truth_at(truth, pts_xy):
-        return truth[np.argmin(np.linalg.norm(gxy[None] - pts_xy[:, None], axis=2), axis=1)]
+        return truth[grid_tree.query(pts_xy)[1]]
 
     def sensor_order(rng, n_max=1000):
         """nested space-filling layout (farthest-point sampling over land cells): the first N sites
@@ -212,7 +237,7 @@ def main():
         n_sensors = 0 if sxy is None else len(sxy)
         obs = []
         if with_current:                                           # today: real record locations
-            lab = rng.random(len(rec_ll)) < truth_at(truth, rxy)
+            lab = rng.random(len(rec_ll)) < truth[rec_cell]
             sx, k, n = aggregate(rec_ll, lab)
             obs.append(site_obs(sx, k, n))
         if n_sensors:
@@ -234,13 +259,13 @@ def main():
         return res
 
     # ---------------- 3-5. scenarios ----------------
-    N_LIST, NIGHTS = [0, 25, 50, 100, 250, 500, 1000], [1, 3, 7, 14, 30]
-    N_MAP, N_NIGHTS = 500, 250
+    N_LIST, NIGHTS = REGION["n_list"], [1, 3, 7, 14, 30]
+    N_MAP, N_NIGHTS = REGION["n_map"], REGION["n_nights"]
     rows = []
     for seed in range(SEEDS):
         rng = np.random.default_rng(seed)
         truth, hot_xy, hot_cell, undisc = make_world(rng)
-        order = sensor_order(np.random.default_rng([seed, 999]))
+        order = sensor_order(np.random.default_rng([seed, 999]), max(N_LIST))
         for n in N_LIST:
             for clf, (se, sp) in [("FPGA classifier", (SENS, SPEC)), ("perfect classifier", (1.0, 1.0))]:
                 if n == 0 and clf != "FPGA classifier":
@@ -273,7 +298,7 @@ def main():
 
     # fig 1: what we know now
     fig, ax = plt.subplots(1, 2, figsize=(13, 6.2))
-    basemap(ax[0], f"What we know now: {known['records']:,} recordings at {known['sites']:,} sites")
+    basemap(ax[0], f"What we know now ({REGION['name']}): {known['records']:,} records at {known['sites']:,} sites")
     cov = np.zeros(LAT.shape);
     for (i, j) in cells_any:
         cov[i, j] = 1
@@ -283,10 +308,10 @@ def main():
     ax[0].legend(loc="lower left", fontsize=8)
     ax[0].text(0.01, 0.99, f"{known['cells_with_any_record_pct']}% of 10-km land cells ever recorded\n"
                f"{known['cells_with_reservoir_record_pct']}% have a horseshoe-bat record\n"
-               f"{known['records_jun_aug_pct']}% of recordings in Jun-Aug",
+               f"{known['acoustic_records']:,} of {known['records']:,} records are acoustic",
                transform=ax[0].transAxes, va="top", fontsize=9, bbox=dict(fc="white", alpha=.8, lw=0))
     ax[1].bar(range(1, 13), months.values, color="#4dd2ff")
-    ax[1].set_xticks(range(1, 13), list("JFMAMJJASOND")); ax[1].set_title("Recordings per month (seasonal blind spots)")
+    ax[1].set_xticks(range(1, 13), list("JFMAMJJASOND")); ax[1].set_title("Records per month (seasonal blind spots)")
     ax[1].spines[["top", "right"]].set_visible(False)
     fig.tight_layout(); fig.savefig(os.path.join(OUT, "1_known_now.png"), dpi=140); plt.close(fig)
 
@@ -296,7 +321,7 @@ def main():
     ex_seed = int(sub.iloc[len(sub) // 2].seed)
     rng = np.random.default_rng(ex_seed)
     truth, hot_xy, hot_cell, undisc = make_world(rng)
-    ex_order = sensor_order(np.random.default_rng([ex_seed, 999]))
+    ex_order = sensor_order(np.random.default_rng([ex_seed, 999]), max(N_LIST))
     frames = {n: run(np.random.default_rng([ex_seed, n]), truth, hot_cell, undisc, ex_order[:n] if n else None,
                      30, SENS, SPEC, keep=True) for n in N_LIST}
     today, net = frames[0], frames[N_MAP]
@@ -354,7 +379,7 @@ def main():
         unknown_rule="posterior sd of logit share > 1.0"),
         results=[dict(zip(["sweep", "clf", "sensors", "nights"], k), **{c: round(v, 4) for c, v in r.items()})
                  for k, r in agg.iterrows()])
-    json.dump(out, open(os.path.join(HERE, "results.json"), "w"), indent=1)
+    json.dump(out, open(os.path.join(HERE, f"results_{REGION['key']}.json"), "w"), indent=1)
 
     # ---------------- data for the interactive visual (predict/viz) ----------------
     ii, jj = np.where(land)
@@ -371,7 +396,7 @@ def main():
         rings.append(np.round(r, 3).tolist())
     fa = agg.loc["sensors"].loc["FPGA classifier"].reset_index()
     viz = dict(
-        region=REGION, grid=GRID, rows=int(LAT.shape[0]), cols=int(LAT.shape[1]),
+        region=dict(REGION, classifier_note=REGION["classifier_note"]), grid=GRID, rows=int(LAT.shape[0]), cols=int(LAT.shape[1]),
         cells=np.c_[ii, jj].tolist(), known=known, example_world=ex_seed, seeds=SEEDS,
         truth=u8(truth), outlines=rings,
         records=[[round(a, 3), round(b, 3), int(c)] for a, b, c in
@@ -388,9 +413,10 @@ def main():
                        high_area_flagged_pct=round(r.high_area_flagged_pct, 1)) for r in fa.itertuples()],
         assumptions=out["assumptions"])
     os.makedirs(os.path.join(HERE, "viz"), exist_ok=True)
-    with open(os.path.join(HERE, "viz", "data.js"), "w") as f:
+    vf = os.path.join(HERE, "viz", f"data_{REGION['key']}.js")
+    with open(vf, "w") as f:
         f.write("window.VIZ = " + json.dumps(viz, separators=(",", ":")) + ";\n")
-    print("viz data:", os.path.getsize(os.path.join(HERE, "viz", "data.js")) // 1024, "KB")
+    print("viz data:", vf, os.path.getsize(vf) // 1024, "KB")
     print("figures in", OUT)
 
 

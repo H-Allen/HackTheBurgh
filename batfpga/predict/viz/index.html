@@ -80,9 +80,17 @@
 </head>
 <body>
 <div class="wrap">
-  <div class="eyebrow">Prediction</div>
-  <h1>What a network of bat sensors would reveal</h1>
-  <div class="sub">Greece &amp; Bulgaria · predicted share of bat activity from horseshoe bats, the SARS-related coronavirus reservoirs</div>
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap">
+    <div>
+      <div class="eyebrow">Prediction</div>
+      <h1>What a network of bat sensors would reveal</h1>
+      <div class="sub" id="sub"></div>
+    </div>
+    <div class="seg" id="region" style="margin-top:6px">
+      <button data-r="sea">South-East Asia</button>
+      <button data-r="balkans">Balkans</button>
+    </div>
+  </div>
 
   <div class="grid">
     <div class="card mapcard">
@@ -143,7 +151,11 @@
   <div class="foot" id="foot"></div>
 </div>
 
-<script src="data.js"></script>
+<script>
+  // region: ?r=sea (default, Laos & Vietnam) or ?r=balkans (Greece & Bulgaria)
+  const REG = new URLSearchParams(location.search).get("r") || "sea";
+  document.write('<script src="data_' + REG + '.js"><\/script>');
+</script>
 <script>
 const V = window.VIZ;
 const STEPS = V.frames.map(f => f.n);
@@ -243,13 +255,15 @@ function draw(now) {
   }
   // sensors: grow in, staggered by deployment order
   const nA = V.frames[from].n, nB = V.frames[step].n, nShow = view === "truth" ? 0 : nA + (nB - nA) * t;
-  const r0 = Math.max(1.6, W / 520);
+  // dots shrink and glow less as the network gets denser, so the map stays readable
+  const dens = Math.min(1, Math.sqrt(250 / Math.max(1, nShow) * (W * H) / 450000));
+  const r0 = Math.max(0.9, W / 520 * (0.55 + 0.45 * dens)), gr = r0 * (2.2 + 1.8 * dens);
   for (let k = 0; k < Math.ceil(nShow); k++) {
     const [la, lo] = V.sensors[k], x = px(lo), y = py(la);
     const a = Math.min(1, nShow - k);
-    const grad = cx.createRadialGradient(x, y, 0, x, y, r0 * 4);
-    grad.addColorStop(0, `rgba(51,214,160,${.55 * a})`); grad.addColorStop(1, "rgba(51,214,160,0)");
-    cx.fillStyle = grad; cx.beginPath(); cx.arc(x, y, r0 * 4, 0, 7); cx.fill();
+    const grad = cx.createRadialGradient(x, y, 0, x, y, gr);
+    grad.addColorStop(0, `rgba(51,214,160,${(.2 + .35 * dens) * a})`); grad.addColorStop(1, "rgba(51,214,160,0)");
+    cx.fillStyle = grad; cx.beginPath(); cx.arc(x, y, gr, 0, 7); cx.fill();
     cx.fillStyle = `rgba(190,255,232,${a})`; cx.beginPath(); cx.arc(x, y, r0 * a, 0, 7); cx.fill();
   }
   // roosts
@@ -302,7 +316,7 @@ function updateStats() {
   document.getElementById("nsens").textContent = fmt(f.n);
   document.getElementById("scene").innerHTML = view === "truth"
     ? "<b>The hidden truth</b> in this simulated world"
-    : f.n === 0 ? `<b>Today:</b> ${fmt(V.known.records)} recordings at ${V.known.sites} sites` : `<b>Today's recordings + ${fmt(f.n)} FPGA sensors</b> · 30 nights`;
+    : f.n === 0 ? `<b>Today:</b> ${fmt(V.known.records)} records at ${V.known.sites} sites` : `<b>Today's records + ${fmt(f.n)} FPGA sensors</b> · 30 nights`;
   [...document.querySelectorAll("#ticks span")].forEach((s, k) => s.classList.toggle("on", k === step));
   drawChart();
 }
@@ -319,7 +333,7 @@ function drawChart() {
   let s = "";
   for (const v of [0, 50, 100]) s += `<line x1="${L}" x2="${w - R}" y1="${ys(v)}" y2="${ys(v)}" stroke="#2a2e36"/>
     <text x="${L - 6}" y="${ys(v) + 4}" text-anchor="end" font-size="11" fill="#8b8f98">${v}%</text>`;
-  STEPS.forEach((n, k) => s += `<text x="${xs(k)}" y="${h - 6}" text-anchor="middle" font-size="11" fill="${k === step ? "#f0efec" : "#8b8f98"}">${n >= 1000 ? "1k" : n}</text>`);
+  STEPS.forEach((n, k) => s += `<text x="${xs(k)}" y="${h - 6}" text-anchor="middle" font-size="11" fill="${k === step ? "#f0efec" : "#8b8f98"}">${n >= 1000 ? n / 1000 + "k" : n}</text>`);
   s += `<line x1="${xs(step)}" x2="${xs(step)}" y1="${T}" y2="${h - B}" stroke="#f0efec" stroke-opacity=".35" stroke-dasharray="3 3"/>`;
   for (const se of SERIES) {
     const pts = V.averages.map((a, k) => [xs(k), ys(se.f(a[se.key]))]);
@@ -388,12 +402,20 @@ document.addEventListener("keydown", e => {
 
 // ---------------- static text ----------------
 const K = V.known;
-document.getElementById("now").innerHTML = `<div class="tag">What we know now · real ChirosetEurope records, ${K.region}</div>
-  <div><b>${fmt(K.records)}</b><span>bat recordings, ${K.years}</span></div>
+document.getElementById("sub").textContent = `${V.region.name} · predicted share of bat activity from horseshoe bats, ` +
+  `the SARS-related coronavirus reservoirs`;
+document.querySelectorAll("#region button").forEach(b => {
+  b.classList.toggle("on", b.dataset.r === V.region.key);
+  b.onclick = () => { location.search = "?r=" + b.dataset.r; };
+});
+document.getElementById("now").innerHTML = `<div class="tag">What we know now · real data: ${K.source}, ${K.region}</div>
+  <div><b>${fmt(K.records)}</b><span>bat records, ${K.years}</span></div>
   <div><b>${K.sites}</b><span>places they were made, across ${fmt(K.land_area_km2)} km²</span></div>
   <div><b>${K.cells_with_any_record_pct}%</b><span>of 10-km land cells ever recorded · ${K.cells_with_reservoir_record_pct}% with a horseshoe bat</span></div>
-  <div><b>${K.records_jun_aug_pct}%</b><span>of recordings made in June–August; only ${K.records_nov_feb} in Nov–Feb</span></div>`;
-document.getElementById("foot").innerHTML = `Simulation, not measurement. A test world of horseshoe-bat activity is built from the real records, with roosts at real horseshoe-bat sites and in places nobody has recorded. Today's knowledge = the real recording locations; sensors = a nested, evenly spread network listening 30 nights (~${V.assumptions.passes_per_night} bat passes a night), every call classified with the FPGA classifier's measured error rates (sensitivity ${(V.assumptions.sensor_sensitivity * 100).toFixed(1)}%, specificity ${(V.assumptions.sensor_specificity * 100).toFixed(1)}%). One Gaussian-process spatial model predicts every map. Map shows the median of ${V.seeds} simulated worlds; numbers on the right show this map and the average. Data are presence-only citizen-science recordings: shares of recorded activity, not abundance. Keys: space play · ←/→ step · T truth.`;
+  ${V.region.source === "gbif"
+    ? `<div><b>${fmt(K.acoustic_records)}</b><span>of them are acoustic recordings; ${Math.round(100 * K.specimen_records / K.records)}% are museum specimens or tissue samples</span></div>`
+    : `<div><b>${K.records_jun_aug_pct}%</b><span>of recordings made in June–August; only ${K.records_nov_feb} in Nov–Feb</span></div>`}`;
+document.getElementById("foot").innerHTML = `Simulation, not measurement. A test world of horseshoe-bat activity is built from the real records, with roosts at real horseshoe-bat sites and in places nobody has recorded. Today's knowledge = the real recording locations; sensors = a nested, evenly spread network listening 30 nights (~${V.assumptions.passes_per_night} bat passes a night), every call classified with the FPGA classifier's error rates (sensitivity ${(V.assumptions.sensor_sensitivity * 100).toFixed(1)}%, specificity ${(V.assumptions.sensor_specificity * 100).toFixed(1)}%; ${V.region.classifier_note}). One Gaussian-process spatial model predicts every map. Map shows the median of ${V.seeds} simulated worlds; numbers on the right show this map and the average. Data are presence-only records (${K.source}): shares of recorded activity, not abundance. Keys: space play · ←/→ step · T truth.`;
 document.getElementById("table").innerHTML = `<tr><th>sensors</th><th>risk unknown</th><th>roosts found</th><th>high-risk mapped</th></tr>` +
   V.averages.map(a => `<tr><td>${fmt(a.n)}</td><td>${a.unknown_area_pct}%</td><td>${Math.round(a.undiscovered_found * 100)}%</td><td>${Math.round(a.high_area_flagged_pct)}%</td></tr>`).join("");
 
