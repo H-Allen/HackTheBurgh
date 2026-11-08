@@ -12,21 +12,23 @@ The laptop plays a recording out loud. At the same moment the board streams **th
    The laptop also needs a local copy of the same folder, which is already in `sdcard/batfpga_eu/` on the Mac.
 
 ## Running it
-1. Power the board and wait about a minute for it to boot. Close `screen`/PuTTY, because only one program can use the serial port.
-2. Start the demo:
-   ```bash
-   .venv/bin/python demo/demo_ui.py --port /dev/tty.usbserial-XXXX1     # Windows: --port COM5
-   ```
-   It logs in (xilinx/xilinx) if needed, becomes root, and starts `run_bat.py --serve` on the board.
-3. Open **http://localhost:8000**. Wait until the top-right badge says **FPGA ready** (10–30 s while the overlay loads).
-4. Pick a recording. **"All species (demo mix)"** is the best one to start with.
+```bash
+cd batfpga
+.venv/bin/python demo/demo_ui.py --fake                              # no board (rehearsal)
+.venv/bin/python demo/demo_ui.py --port /dev/tty.usbserial-XXXX1     # Mac + board
+.venv\Scripts\python demo\demo_ui.py --port COM5                     # Windows + board
+```
+Open **http://localhost:8000**. With the board, close PuTTY/screen first and wait for the green **FPGA ready** badge (10–30 s while the overlay loads). In `--fake` mode the detections come from the bit-exact Python model of the FPGA, so they're identical to the board's output.
 
-To try the UI with no board connected, run `demo_ui.py --fake`. The detections are then replayed from the Python model.
+**Controls:** **Play/Stop** (Space) · listening mode **As recorded / Pitched down / Slowed down** (keys 1/2/3) · **FPGA classifier** switch (C). The mode and the switch apply to the next Play.
 
-## Suggested script
-1. **▶ Real time.** "This is a real recording of horseshoe bats, at real speed. You can't hear anything, because the calls are ultrasonic, 20–110 kHz. But the FPGA can: each box is a call it has just detected and classified, in real time."
-2. **▶ 10× slowed.** "Now slowed down ten times, which is the time-expansion trick bat detectors use. Now you can hear the chirps, and each one lights up as the FPGA classifies it." Red boxes and the alert banner mark species that are SARS-related-coronavirus reservoirs.
-3. Point at the tick/cross counter: the FPGA's answers compared with the species label of each held-out recording.
+## Suggested flow
+1. **Hidden frequencies (classifier off).** Select **Demo mix (15 s)**.
+   - Play in **As recorded**: "That's a real recording of 12 European bat species. You heard almost nothing." The spectrogram fills in as it plays: "Everything above the dashed line is above human hearing."
+   - Play in **Pitched down**: every frequency is divided by 10 with the timing kept, so now you hear the calls, in step with the picture. "Each species has its own call shape: horseshoe bats hold a constant tone at 80–110 kHz, pipistrelles sweep down to about 45 kHz."
+2. **Why it matters:** switch tabs to the disease and simulation dashboard.
+3. **Back to the demo: switch the FPGA classifier on** (C), then Play in **Pitched down**. "The FPGA is now streaming the same recording from its SD card in real time, and every box is a call it has classified." Red boxes and the banner mark SARS-related-coronavirus reservoir species, orange marks Lloviu virus, and purple marks lyssavirus. The ✓/✗ counter compares each answer with the species label of the held-out recording.
+4. **How it works / low power:** FFT → detector → 8 integer features → depth-8 decision tree, all in FPGA logic. See the key facts below.
 
 ## Key facts (only quote measured numbers)
 - The classifier logic is estimated at about **11 mW** (Vivado vectorless estimate, `overlay/reports/power_hier.txt`). The ARM processor that drives the demo is about 1.5 W and wouldn't be needed in a field sensor.

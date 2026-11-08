@@ -8,6 +8,9 @@ make_demo.py - build demo / golden audio from HELD-OUT real recordings (manifest
                                                      the board self-test vectors
      golden/demo_truth.csv                           ground truth for demo_golden.wav:
                                                      start_frame,end_frame,species,class
+     golden/demo/demo_mix.wav (+ demo_mix_truth.csv) longer live-demo mix (--mix-seconds total),
+                                                     several held-out recordings per species,
+                                                     trimmed to where the calls are
 Preprocessing is identical to chiroset_features.py (sr_eff = sampling_rate x time expansion,
 resample to 256 kHz, float -> int16, no normalisation), so the detector sees what training saw.
 Only clips where bat_model's detector finds >= --min-calls calls are used.
@@ -67,6 +70,7 @@ def main():
     ap.add_argument("--min-calls", type=int, default=3)
     ap.add_argument("--min-sr", type=int, default=192_000)
     ap.add_argument("--out", default="golden/demo")
+    ap.add_argument("--mix-seconds", type=float, default=14.0, help="calls per species x n (gaps add ~0.1 s each)")
     a = ap.parse_args()
 
     species = sorted(pd.read_csv(a.features, usecols=["species"]).species.dropna().unique())
@@ -116,6 +120,48 @@ def main():
             f.write("start_frame,end_frame,species,class\n")
             f.writelines(f"{a_},{b_},{sp_},{c_}\n" for a_, b_, sp_, c_ in truth)
         print(f"golden/demo_golden.wav: {len(g) / FS:.1f} s from {len(golden)} species")
+
+    # ---- longer live-demo mix: fill each species' share from several held-out recordings ----
+    def has_file(r):
+        return bool(index.get(os.path.basename(str(r.file_name)).lower()) or
+                    index.get(os.path.basename(str(r.file_path)).lower()))
+    mix_species = [sp for sp in species                                  # held-out audio on disk
+                   if any(has_file(r) for r in m[m.latin == sp].itertuples())]
+    per = a.mix_seconds / max(1, len(mix_species))
+    mix, mtruth, pos = [], [], 0
+    for sp in mix_species:
+        need, parts, recs = int(per * FS), [], 0
+        for r in m[m.latin == sp].sample(frac=1, random_state=1).itertuples():
+            if need <= 0:
+                break
+            path = index.get(os.path.basename(str(r.file_name)).lower()) or \
+                   index.get(os.path.basename(str(r.file_path)).lower())
+            if not path:
+                continue
+            try:
+                x = load(path, r.sr_eff, 30.0)
+            except Exception:
+                continue
+            ev = detect(*frame_stats(fft_mags(x)))
+            if len(ev) < 2:
+                continue
+            s0 = max(0, ev[0][0] - 30) * 256                  # start 30 ms before the first call
+            seg = x[s0: s0 + need]
+            parts.append(seg); need -= len(seg); recs += 1
+        if not parts:
+            print(f"mix: {sp} -- nothing usable"); continue
+        seg = np.concatenate(parts + [np.zeros(FS // 10, np.int16)])           # 100 ms gap
+        mix.append(seg)
+        mtruth.append((pos // 256, (pos + len(seg)) // 256, sp.replace(" ", "_"), class_of(sp, classes)))
+        pos += len(seg)
+        print(f"mix: {sp:28s} {len(seg) / FS:.2f} s from {recs} recording(s)")
+    if mix:
+        g = np.concatenate(mix)
+        write_wav(os.path.join(a.out, "demo_mix.wav"), g)
+        with open(os.path.join(a.out, "demo_mix_truth.csv"), "w") as f:
+            f.write("start_frame,end_frame,species,class\n")
+            f.writelines(f"{a_},{b_},{sp_},{c_}\n" for a_, b_, sp_, c_ in mtruth)
+        print(f"{a.out}/demo_mix.wav: {len(g) / FS:.1f} s, {len(mix)} species")
 
 
 if __name__ == "__main__":

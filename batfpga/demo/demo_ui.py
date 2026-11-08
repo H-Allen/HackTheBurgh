@@ -58,10 +58,34 @@ def write_wav48(path, y):
         w.writeframes((y * 32767).astype("<i2").tobytes())
 
 
+def pitch_down(x, div=10, fs_out=48000):
+    """Frequency division: keep the timing, divide every call's frequency by `div`.
+    Tracks the strongest 15-125 kHz component every 0.25 ms and re-synthesises it as a tone at
+    f/div (1.5-12.5 kHz for div=10), loudness from its level above the clip's noise floor."""
+    hop, n = 64, 256
+    m = (len(x) - n) // hop
+    if m <= 0:
+        return np.zeros(int(len(x) / FS * fs_out))
+    idx = np.arange(n)[None, :] + hop * np.arange(m)[:, None]
+    S = np.abs(np.fft.rfft(x[idx] * np.hanning(n), axis=1))[:, 15:126]
+    k = S.argmax(axis=1)
+    pk = S[np.arange(m), k]
+    a, b, c = S[np.arange(m), np.maximum(k - 1, 0)], pk, S[np.arange(m), np.minimum(k + 1, S.shape[1] - 1)]
+    off = np.clip(0.5 * (a - c) / np.where(a - 2 * b + c == 0, -1e-9, a - 2 * b + c), -0.5, 0.5)
+    f = (15 + k + off) * 1000.0 / div                          # Hz after division
+    db = 20 * np.log10(pk + 1e-9)
+    amp = np.clip((db - np.median(db) - 8) / 25, 0, 1) ** 1.5  # gate the noise floor
+    t_frames = (hop * np.arange(m) + n / 2) / FS
+    t_out = np.arange(int(len(x) / FS * fs_out)) / fs_out
+    fo = np.interp(t_out, t_frames, f)
+    ao = np.interp(t_out, t_frames, amp)
+    return ao * np.sin(2 * np.pi * np.cumsum(fo) / fs_out)
+
+
 def render(clip, cache):
     """spectrogram PNG + audible renders, cached by file mtime."""
     base = os.path.splitext(os.path.basename(clip))[0]
-    out = {k: os.path.join(cache, f"{base}{k}") for k in ("_spec.png", "_real.wav", "_slow.wav")}
+    out = {k: os.path.join(cache, f"{base}{k}") for k in ("_spec.png", "_real.wav", "_pitch.wav", "_slow.wav")}
     x, sr = read_wav(clip)
     if sr != FS:
         print(f"WARNING {clip}: {sr} Hz, expected {FS}")
@@ -73,17 +97,25 @@ def render(clip, cache):
     n = len(x) // 256                                         # FPGA frames: 256 samples, 1 kHz bins
     fr = x[: n * 256].reshape(n, 256) * np.hanning(256)
     S = 20 * np.log10(np.abs(np.fft.rfft(fr, axis=1))[:, :128].T + 1e-3)
-    lo, hi = np.percentile(S, 50), np.percentile(S, 99.7)
-    plt.imsave(out["_spec.png"], np.clip((S - lo) / (hi - lo + 1e-9), 0, 1)[::-1], cmap="magma")
+    S = S - np.median(S, axis=1, keepdims=True)              # per-frequency noise floor -> 0 dB
+    if S.shape[1] > 4000:                                    # browsers: keep the image <= 4000 px
+        k = int(np.ceil(S.shape[1] / 4000))
+        S = np.pad(S, ((0, 0), (0, (-S.shape[1]) % k)), constant_values=S.min())
+        S = S.reshape(S.shape[0], -1, k).max(axis=2)          # max-pool keeps short calls visible
+    hi = max(np.percentile(S, 99.7), 6.0)
+    plt.imsave(out["_spec.png"], np.clip(S / hi, 0, 1)[::-1] ** 0.8, cmap="magma")
     write_wav48(out["_real.wav"], resample_poly(x, 3, 16))    # 256k -> 48k: ultrasound removed
     write_wav48(out["_slow.wav"], resample_poly(x, 15, 8))    # as if 25.6 kHz -> 48k: x10 slower
+    write_wav48(out["_pitch.wav"], pitch_down(x))            # same timing, frequencies / 10
     return info
 
 
 def load_truth(clips_dir, info):
-    """demo_truth.csv applies to audio.wav; single-species clips: species from the file name."""
-    if info["name"] == "audio.wav" and os.path.exists(os.path.join(clips_dir, "demo_truth.csv")):
-        rows = open(os.path.join(clips_dir, "demo_truth.csv")).read().splitlines()[1:]
+    """<clip>_truth.csv next to the clip (demo_truth.csv for audio.wav); single-species clips:
+    species from the file name."""
+    tf = os.path.join(clips_dir, "demo_truth.csv" if info["name"] == "audio.wav" else info["base"] + "_truth.csv")
+    if os.path.exists(tf):
+        rows = open(tf).read().splitlines()[1:]
         return [dict(s=int(r.split(",")[0]), e=int(r.split(",")[1]), species=r.split(",")[2].replace("_", " "),
                      cls=r.split(",")[3]) for r in rows if r.count(",") >= 3]
     m = re.match(r"([A-Z][a-z]+_[a-z]+)_CSE-([A-Z]+)-", info["name"])
@@ -172,6 +204,9 @@ class Board:
     def play(self, clip, speed):
         self.send(f"PLAY {clip} {speed:g}\n")
 
+    def stop(self):
+        self.send("STOP\n")
+
 
 class FakeBoard:
     """No hardware: computes what the FPGA would output with the bit-exact Python model
@@ -200,13 +235,20 @@ class FakeBoard:
             self.cache[clip] = evs
         return self.cache[clip]
 
+    def stop(self):
+        self.run_id = getattr(self, "run_id", 0) + 1
+
     def play(self, clip, speed):
+        self.stop()
+        me = self.run_id
         def run():
             evs = self.events(clip)
             self.broadcast(dict(type="start", clip=clip, speed=speed))
             t0 = time.time()
             for v in evs:
                 time.sleep(max(0, v[0] / 1000 * speed - (time.time() - t0)))
+                if self.run_id != me:
+                    return
                 self.broadcast(dict(type="call", frame=v[0], cls=v[1], conf=v[2], dur=v[3], f_start=v[4],
                                     f_end=v[5], f_peak=v[6], f_min=v[7], f_max=v[8], bw=v[9], sweep=v[10]))
             self.broadcast(dict(type="end", calls=len(evs)))
@@ -238,7 +280,7 @@ def main():
         info["truth"] = load_truth(a.clips, info)
         clips.append(info)
         print(f"clip {info['name']}: {info['dur']:.2f} s")
-    clips.sort(key=lambda c: (c["name"] != "audio.wav", c["name"]))
+    clips.sort(key=lambda c: (c["name"] != "demo_mix.wav", c["name"] != "audio.wav", c["name"]))
     classes = load_classes(os.path.join(a.clips, "classes.txt"))
 
     clients, clients_lock = [], threading.Lock()
@@ -296,6 +338,9 @@ def main():
             self.send_error(404)
 
         def do_POST(self):
+            if urlparse(self.path).path == "/api/stop":
+                board.stop()
+                return self.send_bytes(b"{}", "application/json")
             if urlparse(self.path).path == "/api/play":
                 body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
                 board.play(os.path.basename(body["clip"]), float(body.get("speed", 1)))

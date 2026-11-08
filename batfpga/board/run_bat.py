@@ -11,6 +11,7 @@ On the board (serial console):
     python3 run_bat.py audio.wav --truth demo_truth.csv --realtime       # demo with ground truth
     python3 run_bat.py --serve      # demo UI mode: load overlay once, then take commands on stdin:
         PLAY <file.wav> [speed]     stream file paced at real time x speed (10 = 10x slowed down)
+        STOP                        abort the current PLAY
         QUIT
       prints READY, START <file> <speed> <samples>, CSV call lines, END <calls>
 
@@ -142,7 +143,16 @@ def main():
                     log(f"  t={frame / 1000:8.3f}s  {pred}  conf {ev[2]}")
 
     bufs = {}
-    def stream(x, speed, chunk_s, quiet):
+    def stop_requested():
+        """serve mode: a STOP line on stdin aborts the current stream."""
+        import select
+        while select.select([sys.stdin], [], [], 0)[0]:
+            line = sys.stdin.readline()
+            if not line or line.strip().upper() == "STOP":
+                return True
+        return False
+
+    def stream(x, speed, chunk_s, quiet, can_stop=False):
         """DMA x through the FPGA in chunks; speed=None: as fast as possible, else paced so the
         chunk is sent once its audio 'has happened' at real time x speed."""
         chunk = max(2, int(chunk_s * FS) & ~1)
@@ -158,6 +168,8 @@ def main():
                 lag = (i + len(seg)) / FS * speed - (time.time() - t0)
                 if lag > 0:
                     time.sleep(lag)
+            if can_stop and stop_requested():
+                break
             ts = time.time()
             dma.sendchannel.transfer(buf)
             dma.sendchannel.wait()
@@ -184,6 +196,8 @@ def main():
                 continue
             if p[0].upper() == "QUIT":
                 break
+            if p[0].upper() == "STOP":
+                continue                              # nothing playing
             if p[0].upper() != "PLAY" or len(p) < 2:
                 print(f"ERROR bad command: {line.strip()}", flush=True); continue
             path = p[1] if os.path.exists(p[1]) else os.path.join(HERE, p[1])
@@ -197,7 +211,7 @@ def main():
             x = cache[path]
             reset_core(); events.clear()
             print(f"START {os.path.basename(path)} {speed:g} {len(x)}", flush=True)
-            stream(x, speed, 0.02, quiet=True)
+            stream(x, speed, 0.02, quiet=True, can_stop=True)
             print(f"END {len(events)}", flush=True)
         return
 
