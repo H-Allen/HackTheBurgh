@@ -11,3 +11,4 @@ vivado/proj/
 *.jou
 *.log
 sim_events*.txt
+demo/media/

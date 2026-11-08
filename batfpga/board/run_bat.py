@@ -9,6 +9,10 @@ On the board (serial console):
     python3 run_bat.py audio.wav --realtime           # paced to real time (live-looking demo)
     python3 run_bat.py audio.hex --expect expected_events_fixedfft.txt   # self-test
     python3 run_bat.py audio.wav --truth demo_truth.csv --realtime       # demo with ground truth
+    python3 run_bat.py --serve      # demo UI mode: load overlay once, then take commands on stdin:
+        PLAY <file.wav> [speed]     stream file paced at real time x speed (10 = 10x slowed down)
+        QUIT
+      prints READY, START <file> <speed> <samples>, CSV call lines, END <calls>
 
 stdout: frame_idx,class_id,confidence,dur,f_start,f_end,f_peak,f_min,f_max,bw,sweep
 stderr: species names, stats, PASS/FAIL (so stdout stays clean CSV for the dashboard).
@@ -56,7 +60,8 @@ def load_classes(path):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("audio")
+    ap.add_argument("audio", nargs="?")
+    ap.add_argument("--serve", action="store_true", help="demo UI mode (see top of file)")
     ap.add_argument("--bit", default=os.path.join(HERE, "bat.bit"))
     ap.add_argument("--tree", default=os.path.join(HERE, "tree.hex"))
     ap.add_argument("--classes", default=os.path.join(HERE, "classes.txt"))
@@ -72,8 +77,8 @@ def main():
 
     from pynq import Overlay, allocate, Clocks
 
-    x = load_audio(a.audio)
-    x = x[: len(x) & ~1]                              # DMA words carry 2 samples
+    if not a.serve and not a.audio:
+        sys.exit("give an audio file, or --serve")
     tree = [int(l, 16) for l in open(a.tree) if l.strip()]
     names = load_classes(a.classes)
     truth = []
@@ -87,13 +92,12 @@ def main():
             if s0 <= frame - 1 < s1:              # frame = first quiet frame after the call
                 return sp, cl
         return None
-    log(f"audio: {len(x)} samples = {len(x) / FS:.2f} s; tree: {len(tree)} nodes")
 
     t = time.time()
     ol = Overlay(a.bit)
     dma, bat = ol.axi_dma, ol.bat_axi_0
     fclk = Clocks.fclk0_mhz
-    log(f"overlay loaded in {time.time() - t:.1f} s, FCLK0 {fclk:.1f} MHz")
+    log(f"overlay loaded in {time.time() - t:.1f} s, FCLK0 {fclk:.1f} MHz; tree: {len(tree)} nodes")
     if bat.read(ID) != 0xBA7F0001:
         sys.exit(f"bad ID register {bat.read(ID):08x}: wrong bitstream?")
 
@@ -101,8 +105,10 @@ def main():
     bat.write(TREE_ADDR, 0)
     for w in tree:
         bat.write(TREE_DATA, w)
-    bat.write(CTRL, 1 | 2)                            # clear event FIFO
-    bat.write(CTRL, 0)                                # run
+
+    def reset_core():                                 # frame index restarts at 0, FIFO empty
+        bat.write(CTRL, 1 | 2)
+        bat.write(CTRL, 0)
 
     out = open(a.out, "w") if a.out else None
     def emit(line):
@@ -113,7 +119,7 @@ def main():
         emit("frame_idx,class_id,confidence,dur,f_start,f_end,f_peak,f_min,f_max,bw,sweep")
 
     events = []
-    def drain():
+    def drain(quiet):
         st = bat.read(STATUS)
         if st & (1 << 16):
             log("WARNING: event FIFO overflowed (events lost)")
@@ -125,7 +131,7 @@ def main():
             ev = (frame, (c >> 8) & 0xF, c & 0xFF, *f)
             events.append(ev)
             emit(",".join(map(str, ev)))
-            if not a.quiet:
+            if not quiet:
                 pred = names.get(ev[1], str(ev[1]))
                 t = true_of(frame) if truth else None
                 if t:
@@ -135,29 +141,71 @@ def main():
                 else:
                     log(f"  t={frame / 1000:8.3f}s  {pred}  conf {ev[2]}")
 
-    chunk = max(2, int(a.chunk * FS) & ~1)
     bufs = {}
-    t0 = time.time(); hw_s = 0.0
-    for i in range(0, len(x), chunk):
-        seg = x[i:i + chunk]
-        if len(seg) not in bufs:
-            bufs[len(seg)] = allocate(shape=(len(seg),), dtype=np.int16)
-        buf = bufs[len(seg)]
-        buf[:] = seg
-        buf.flush()
-        if a.realtime:                                # wait until this chunk's audio "has happened"
-            lag = (i + len(seg)) / FS - (time.time() - t0)
-            if lag > 0:
-                time.sleep(lag)
-        ts = time.time()
-        dma.sendchannel.transfer(buf)
-        dma.sendchannel.wait()
-        while not bat.read(STATUS) & (1 << 18):       # core idle: last frame processed
-            pass
-        hw_s += time.time() - ts
-        drain()
-    time.sleep(0.001); drain()
-    wall = time.time() - t0
+    def stream(x, speed, chunk_s, quiet):
+        """DMA x through the FPGA in chunks; speed=None: as fast as possible, else paced so the
+        chunk is sent once its audio 'has happened' at real time x speed."""
+        chunk = max(2, int(chunk_s * FS) & ~1)
+        t0 = time.time(); hw_s = 0.0
+        for i in range(0, len(x), chunk):
+            seg = x[i:i + chunk]
+            if len(seg) not in bufs:
+                bufs[len(seg)] = allocate(shape=(len(seg),), dtype=np.int16)
+            buf = bufs[len(seg)]
+            buf[:] = seg
+            buf.flush()
+            if speed:
+                lag = (i + len(seg)) / FS * speed - (time.time() - t0)
+                if lag > 0:
+                    time.sleep(lag)
+            ts = time.time()
+            dma.sendchannel.transfer(buf)
+            dma.sendchannel.wait()
+            while not bat.read(STATUS) & (1 << 18):   # core idle: last frame processed
+                pass
+            hw_s += time.time() - ts
+            drain(quiet)
+        time.sleep(0.001); drain(quiet)
+        return time.time() - t0, hw_s
+
+    if a.serve:
+        import glob
+        cache = {}
+        for f in sorted(glob.glob(os.path.join(HERE, "*.wav"))):     # preload: no stall on first PLAY
+            try:
+                xx = load_audio(f); cache[f] = xx[: len(xx) & ~1]
+            except Exception as e:
+                log(f"skip {f}: {e}")
+        log(f"preloaded {len(cache)} clips")
+        print("READY", flush=True)
+        for line in sys.stdin:
+            p = line.split()
+            if not p:
+                continue
+            if p[0].upper() == "QUIT":
+                break
+            if p[0].upper() != "PLAY" or len(p) < 2:
+                print(f"ERROR bad command: {line.strip()}", flush=True); continue
+            path = p[1] if os.path.exists(p[1]) else os.path.join(HERE, p[1])
+            speed = float(p[2]) if len(p) > 2 else 1.0
+            try:
+                if path not in cache:
+                    xx = load_audio(path)
+                    cache[path] = xx[: len(xx) & ~1]
+            except Exception as e:
+                print(f"ERROR {e}", flush=True); continue
+            x = cache[path]
+            reset_core(); events.clear()
+            print(f"START {os.path.basename(path)} {speed:g} {len(x)}", flush=True)
+            stream(x, speed, 0.02, quiet=True)
+            print(f"END {len(events)}", flush=True)
+        return
+
+    x = load_audio(a.audio)
+    x = x[: len(x) & ~1]                              # DMA words carry 2 samples
+    log(f"audio: {len(x)} samples = {len(x) / FS:.2f} s")
+    reset_core()
+    wall, hw_s = stream(x, 1.0 if a.realtime else None, a.chunk, a.quiet)
 
     smp, busy, cyc = bat.read(SAMPLES), bat.read(BUSY), bat.read(CYCLES)
     frames = smp // 256

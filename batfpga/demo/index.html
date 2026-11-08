@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BatFPGA live</title>
+<style>
+  :root {
+    --bg: #0d1117; --panel: #161b22; --line: #30363d; --text: #e6edf3; --muted: #8b949e;
+    --accent: #4dd2ff; --ok: #3fb950; --bad: #f85149;
+    --r-sars: #ff5c5c; --r-lloviu: #ffa31a; --r-eblv: #c77dff; --r-other: #4dd2ff; --r-noise: #8b949e;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 15px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  header { display: flex; align-items: center; gap: 16px; padding: 14px 20px; border-bottom: 1px solid var(--line); }
+  header h1 { font-size: 20px; margin: 0; font-weight: 650; letter-spacing: .2px; }
+  header .sub { color: var(--muted); font-size: 13px; }
+  .pill { margin-left: auto; padding: 4px 12px; border-radius: 999px; font-size: 13px;
+          border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
+  .pill.ready { color: var(--ok); border-color: var(--ok); }
+  main { display: grid; grid-template-columns: 240px 1fr 330px; gap: 16px; padding: 16px 20px; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px; }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); margin: 0 0 10px; font-weight: 600; }
+  #clips button { display: block; width: 100%; text-align: left; margin: 0 0 6px; padding: 8px 10px;
+                  background: transparent; color: var(--text); border: 1px solid var(--line); border-radius: 7px;
+                  cursor: pointer; font-size: 13px; }
+  #clips button.sel { border-color: var(--accent); background: rgba(77,210,255,.08); }
+  #clips button small { display: block; color: var(--muted); font-size: 11px; }
+  .stage { position: relative; }
+  #spec { width: 100%; height: 420px; display: block; border-radius: 8px; background: #000; }
+  #truth { position: relative; height: 26px; margin-top: 6px; }
+  #truth div { position: absolute; top: 0; height: 26px; border-left: 1px solid var(--line); padding: 4px 6px;
+               font-size: 11px; color: var(--muted); overflow: hidden; white-space: nowrap; }
+  .controls { display: flex; gap: 12px; margin-top: 14px; flex-wrap: wrap; align-items: center; }
+  .controls button { padding: 12px 18px; font-size: 15px; font-weight: 600; border-radius: 8px; cursor: pointer;
+                     border: 1px solid var(--accent); background: rgba(77,210,255,.12); color: var(--text); }
+  .controls button:disabled { opacity: .4; cursor: default; }
+  .controls .hint { color: var(--muted); font-size: 13px; }
+  #alert { display: none; margin-bottom: 12px; padding: 12px 14px; border-radius: 8px; font-weight: 600;
+           background: rgba(255,92,92,.15); border: 1px solid var(--r-sars); color: #ffd7d7; }
+  #alert.on { display: block; animation: pulse 1s ease-in-out 3; }
+  @keyframes pulse { 50% { background: rgba(255,92,92,.35); } }
+  .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px; }
+  .stat { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
+  .stat b { display: block; font-size: 22px; font-variant-numeric: tabular-nums; }
+  .stat span { color: var(--muted); font-size: 12px; }
+  #feed { max-height: 460px; overflow-y: auto; }
+  .ev { display: grid; grid-template-columns: 8px 1fr auto; gap: 10px; align-items: center;
+        padding: 7px 4px; border-bottom: 1px solid var(--line); animation: fadein .25s; }
+  .ev .bar { width: 8px; height: 34px; border-radius: 3px; }
+  .ev .nm { font-weight: 600; font-size: 14px; }
+  .ev .meta { color: var(--muted); font-size: 12px; }
+  .ev .cf { text-align: right; font-variant-numeric: tabular-nums; font-size: 13px; }
+  .ev .cf .ok { color: var(--ok); } .ev .cf .bad { color: var(--bad); }
+  @keyframes fadein { from { opacity: 0; transform: translateY(-4px); } }
+  .legend { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 10px; font-size: 12px; color: var(--muted); }
+  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+  footer { padding: 0 20px 16px; color: var(--muted); font-size: 12px; }
+  @media (max-width: 1100px) { main { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>BatFPGA: live bat species detection on an FPGA</h1>
+    <div class="sub">FFT → call detector → 8 integer features → decision tree, all in FPGA logic</div>
+  </div>
+  <div id="pill" class="pill">connecting…</div>
+</header>
+
+<main>
+  <section class="panel">
+    <h2>Recordings (held-out, never used in training)</h2>
+    <div id="clips"></div>
+  </section>
+
+  <section class="panel stage">
+    <h2 id="title">Spectrogram (0–128 kHz) with FPGA detections</h2>
+    <canvas id="spec" width="1400" height="420"></canvas>
+    <div id="truth"></div>
+    <div class="controls">
+      <button id="bReal" onclick="play(1)">▶ Real time</button>
+      <button id="bSlow" onclick="play(10)">▶ 10× slowed (audible)</button>
+      <span class="hint" id="hint">Real time: bat calls are ultrasonic, so you hear nothing; the FPGA still sees them.</span>
+    </div>
+    <div class="legend" id="legend"></div>
+  </section>
+
+  <section class="panel">
+    <div id="alert"></div>
+    <div class="stats">
+      <div class="stat"><b id="nCalls">0</b><span>calls classified by the FPGA</span></div>
+      <div class="stat"><b id="nOk">–</b><span>species correct (vs. recording label)</span></div>
+    </div>
+    <h2>FPGA output (live)</h2>
+    <div id="feed"></div>
+  </section>
+</main>
+<footer id="foot"></footer>
+
+<script>
+const RISK = {
+  "SARSr-CoV_reservoir": ["var(--r-sars)", "SARS-related coronavirus reservoir"],
+  "Lloviu_reservoir":    ["var(--r-lloviu)", "Lloviu virus reservoir"],
+  "EBLV1_reservoir":     ["var(--r-eblv)", "Lyssavirus (EBLV-1) reservoir"],
+  "EBLV2_reservoir":     ["var(--r-eblv)", "Lyssavirus (EBLV-2) reservoir"],
+  "other_bat":           ["var(--r-other)", "Other bat"],
+  "noise":               ["var(--r-noise)", "Noise"],
+};
+const css = v => getComputedStyle(document.documentElement).getPropertyValue(v.slice(4, -1)).trim();
+const riskOf = r => RISK[r] || RISK.other_bat;
+
+let st = null, clip = null, calls = [], playing = false, speed = 1;
+const audio = new Audio();
+const img = new Image();
+const cv = document.getElementById("spec"), cx = cv.getContext("2d");
+
+async function init() {
+  st = await (await fetch("/api/state")).json();
+  const box = document.getElementById("clips");
+  st.clips.forEach((c, i) => {
+    const b = document.createElement("button");
+    const label = c.name === "audio.wav" ? "All species (demo mix)" :
+                  (c.truth[0] ? c.truth[0].species : c.name);
+    b.innerHTML = `${label}<small>${c.dur.toFixed(1)} s · ${c.name === "audio.wav" ? c.truth.length + " species" : c.truth[0]?.cls || ""}</small>`;
+    b.onclick = () => select(i);
+    box.appendChild(b);
+  });
+  const seen = new Set();
+  document.getElementById("legend").innerHTML = Object.values(st.classes).map(c => c.risk)
+    .filter(r => !seen.has(r) && seen.add(r))
+    .map(r => `<span><i style="background:${riskOf(r)[0]}"></i>${riskOf(r)[1]}</span>`).join("");
+  document.getElementById("foot").textContent = st.fake
+    ? "TEST MODE (--fake): detections replayed from Python, no board connected."
+    : "Detections come from the PYNQ-Z2 FPGA over USB serial, as it streams the same recording from its SD card.";
+  setPill(st.ready ? "FPGA ready" : "waiting for FPGA…", st.ready);
+  select(0);
+  const es = new EventSource("/api/events");
+  es.onmessage = e => onMsg(JSON.parse(e.data));
+  requestAnimationFrame(draw);
+}
+
+function setPill(t, ready) {
+  const p = document.getElementById("pill");
+  p.textContent = t; p.className = "pill" + (ready ? " ready" : "");
+  st.ready = ready;
+  document.getElementById("bReal").disabled = document.getElementById("bSlow").disabled = !ready || playing;
+}
+
+function select(i) {
+  if (playing) return;
+  clip = st.clips[i]; calls = [];
+  [...document.querySelectorAll("#clips button")].forEach((b, j) => b.classList.toggle("sel", i === j));
+  img.src = `/media/${clip.base}_spec.png`;
+  document.getElementById("truth").innerHTML = clip.truth.map(t =>
+    `<div style="left:${t.s / clip.frames * 100}%;width:${(t.e - t.s) / clip.frames * 100}%" title="${t.species}">${t.species}</div>`).join("");
+  resetPanel();
+}
+
+function resetPanel() {
+  document.getElementById("feed").innerHTML = "";
+  document.getElementById("nCalls").textContent = "0";
+  document.getElementById("nOk").textContent = "–";
+  document.getElementById("alert").className = "";
+}
+
+function play(s) {
+  if (!st.ready || playing) return;
+  speed = s; playing = true; calls = []; resetPanel();
+  setPill("FPGA classifying…", true);
+  document.getElementById("hint").textContent = s === 1
+    ? "Real time: bat calls are ultrasonic, so you hear nothing; the FPGA still sees them."
+    : "10× slowed down (time expansion): calls drop from 20–110 kHz to 2–11 kHz, so you can hear them.";
+  audio.src = `/media/${clip.base}_${s === 1 ? "real" : "slow"}.wav`;
+  audio.currentTime = 0;
+  audio.play();                                     // inside the click: no autoplay block
+  fetch("/api/play", { method: "POST", body: JSON.stringify({ clip: clip.name, speed: s }) });
+}
+audio.onended = () => { playing = false; setPill("FPGA ready", true); };
+
+function truthAt(frame) {
+  return clip.truth.find(t => t.s <= frame - 1 && frame - 1 < t.e);
+}
+
+function onMsg(m) {
+  if (m.type === "status") setPill(m.msg === "connected" ? (m.ready ? "FPGA ready" : "waiting for FPGA…") : m.msg, m.ready);
+  if (m.type === "call" && playing) {
+    const c = st.classes[m.cls] || { code: "?" + m.cls, name: "class " + m.cls, risk: "other_bat" };
+    m.c = c; m.truth = truthAt(m.frame); m.ok = m.truth ? m.truth.cls === c.code : null;
+    calls.push(m);
+    addFeed(m);
+    if (c.risk !== "other_bat" && c.risk !== "noise" && m.conf >= 150) showAlert(m);
+  }
+}
+
+function addFeed(m) {
+  const d = document.createElement("div");
+  d.className = "ev";
+  const [col, rname] = riskOf(m.c.risk);
+  const mark = m.ok === null ? "" : m.ok ? `<span class="ok">✓</span>` : `<span class="bad">✗ ${m.truth.cls}</span>`;
+  d.innerHTML = `<div class="bar" style="background:${col}"></div>
+    <div><div class="nm">${m.c.name}</div><div class="meta">${(m.frame / 1000).toFixed(3)} s · ${m.f_max}→${m.f_min} kHz · ${m.dur} ms · ${rname}</div></div>
+    <div class="cf">${Math.round(m.conf / 2.55)}%<br>${mark}</div>`;
+  const feed = document.getElementById("feed");
+  feed.prepend(d);
+  document.getElementById("nCalls").textContent = calls.length;
+  const judged = calls.filter(c => c.ok !== null);
+  if (judged.length) document.getElementById("nOk").textContent =
+    `${judged.filter(c => c.ok).length}/${judged.length}`;
+}
+
+function showAlert(m) {
+  const a = document.getElementById("alert");
+  a.innerHTML = `⚠ ${riskOf(m.c.risk)[1]} detected: ${m.c.name} (${Math.round(m.conf / 2.55)}% confidence) at ${(m.frame / 1000).toFixed(2)} s`;
+  a.style.borderColor = riskOf(m.c.risk)[0];
+  a.className = ""; void a.offsetWidth; a.className = "on";
+}
+
+function draw() {
+  const W = cv.width, H = cv.height;
+  cx.fillStyle = "#000"; cx.fillRect(0, 0, W, H);
+  if (img.complete && img.naturalWidth) { cx.imageSmoothingEnabled = true; cx.drawImage(img, 0, 0, W, H); }
+  cx.font = "13px sans-serif"; cx.fillStyle = "rgba(255,255,255,.55)";
+  for (const k of [20, 40, 60, 80, 100, 120]) {
+    const y = (1 - k / 128) * H;
+    cx.fillRect(0, y, 6, 1); cx.fillText(k + " kHz", 9, y + 4);
+  }
+  if (clip) {
+    for (const m of calls) {
+      const x0 = (m.frame - m.dur) / clip.frames * W, x1 = m.frame / clip.frames * W;
+      const y0 = (1 - (m.f_max + 2) / 128) * H, y1 = (1 - (m.f_min - 2) / 128) * H;
+      const col = css(riskOf(m.c.risk)[0]);
+      cx.strokeStyle = col; cx.lineWidth = 2;
+      cx.strokeRect(x0, y0, Math.max(x1 - x0, 3), Math.max(y1 - y0, 4));
+      cx.fillStyle = col; cx.font = "bold 13px sans-serif";
+      cx.fillText(m.c.code, x0, y0 - 5);
+    }
+    if (playing || audio.currentTime > 0) {
+      const p = audio.duration ? audio.currentTime / audio.duration : 0;
+      cx.fillStyle = "rgba(255,255,255,.85)"; cx.fillRect(p * W - 1, 0, 2, H);
+    }
+  }
+  requestAnimationFrame(draw);
+}
+init().then(() => { if (location.hash === "#selftest") { play(0.1); } }).catch(e => console.log("INITERR", e));
+</script>
+</body>
+</html>
